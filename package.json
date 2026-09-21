@@ -1,0 +1,15 @@
+{
+  "name": "@xybernetex/openclaw",
+  "version": "0.1.0",
+  "type": "module",
+  "peerDependencies": {
+    "openclaw": ">=2026.9.5"
+  },
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "compat": {
+      "pluginApi": ">=2026.9.5",
+      "minGatewayVersion": "2026.9.5"
+    }
+  }
+}
