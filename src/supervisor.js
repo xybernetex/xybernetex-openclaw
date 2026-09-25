@@ -46,6 +46,7 @@ export function createSupervisor({
   maxToolCallsPerRun = 50,
   requestTimeoutMs = 5_000,
   maxTrackedRuns = 200,
+  proposalTelemetry = false,
   fetchImpl = fetch,
   log = () => {},
   now = () => Date.now(),
@@ -79,6 +80,7 @@ export function createSupervisor({
       cost_so_far: step,
       cost_budget: maxToolCallsPerRun,
       goal_drift_score: null,
+      feature_schema: "xybernetex.state.v1",
     };
   }
 
@@ -112,7 +114,7 @@ export function createSupervisor({
   // call synchronously, then queues the evaluation behind the run's previous
   // one so each request sees every decision made before it. Returns that
   // queued promise (tests await it; the hook doesn't).
-  function recordToolCall(runKey, { toolName, params, error, sessionKey }) {
+  function recordToolCall(runKey, { toolName, params, error, sessionKey, toolCallId }) {
     const run = getRun(runKey);
     const errorText = typeof error === "string" ? error : error ? String(error) : "";
     const record = {
@@ -128,7 +130,12 @@ export function createSupervisor({
     run.toolTail.push(record);
     if (run.toolTail.length > TOOL_TAIL) run.toolTail.shift();
     run.toolCount += 1;
+    if (proposalTelemetry) {
+      try { log({ type: "tool_completed", runKey, sessionKey, toolCallId, step: run.toolCount, record }); }
+      catch { /* best-effort telemetry */ }
+    }
     const atCall = { step: run.toolCount, toolTail: [...run.toolTail], toolName, sessionKey };
+    if (!endpoint || !apiKey) return Promise.resolve();
     run.queue = run.queue.then(() => evaluate(run, runKey, atCall));
     return run.queue;
   }
@@ -137,5 +144,17 @@ export function createSupervisor({
     runs.delete(runKey);
   }
 
-  return { recordToolCall, endRun, trackedRuns: () => runs.size };
+  // Capture pending intent separately: no fabricated outcome, no step/cost
+  // increment, no policy request and no mutation of completed-call history.
+  function recordProposal(runKey, { toolName, params, toolCallId, sessionKey }) {
+    const run = getRun(runKey);
+    const proposed = { tool_name: toolName, params: { h: hashParams(params) },
+      tool_call_id: toolCallId ?? null, risk: classifyToolCall(toolName, params) };
+    const snapshot = { ...snapshotFor(run, runKey, { step: run.toolCount, toolTail: [...run.toolTail] }),
+      feature_schema: "xybernetex.state.v2", proposed_call: proposed };
+    log({ type: "tool_proposal", runKey, sessionKey, toolCallId, snapshot });
+    return snapshot;
+  }
+
+  return { recordToolCall, recordProposal, endRun, trackedRuns: () => runs.size };
 }

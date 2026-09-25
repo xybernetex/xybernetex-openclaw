@@ -16,6 +16,7 @@ type Config = {
   apiKey?: string;
   maxToolCallsPerRun?: number;
   logPath?: string;
+  proposalTelemetry?: boolean;
   control?: {
     mode?: "observe" | "enforce";
     rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string>;
@@ -40,33 +41,35 @@ export default {
       }
     };
 
-    // Register the local gate even if remote observation is unavailable.
-    // No endpoint failure can disable configured restrictions.
-    const gate = createToolGate({ ...config.control, log: writeLog });
-    api.on("before_tool_call", gate, { priority: 100 });
-    writeLog({ type: "tool_gate_ready", mode: config.control?.mode ?? "observe",
-      ruleIds: (config.control?.rules ?? []).map((rule) => rule.id) });
-
-    // The key can come from the environment so it stays out of openclaw.json.
     const apiKey = process.env.XYBERNETEX_API_KEY ?? config.apiKey;
-    if (!config.endpoint || !apiKey) {
-      writeLog({ error: "xybernetex-openclaw remote observation disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
-                        "(or plugin config `apiKey`) - see README" });
-      return;
-    }
-
-    const supervisor = createSupervisor({
-      endpoint: config.endpoint,
-      apiKey,
-      maxToolCallsPerRun: config.maxToolCallsPerRun,
-      log: writeLog,
-    });
-
-    // One supervised trajectory = one agent run (a single user turn and all
-    // its tool calls). Falls back to the session when a run id is missing.
+    const supervisor = createSupervisor({ endpoint: config.endpoint, apiKey,
+      maxToolCallsPerRun: config.maxToolCallsPerRun, proposalTelemetry: config.proposalTelemetry, log: writeLog });
     const runKeyOf = (event: any, ctx: any): string =>
       event?.runId ?? ctx?.runId ?? ctx?.sessionKey ?? ctx?.sessionId ?? "unknown";
 
+    // Register the local gate even if remote observation is unavailable.
+    // No endpoint failure can disable configured restrictions.
+    const gate = createToolGate({ ...config.control, log: writeLog });
+    api.on("before_tool_call", (event: any, ctx: any) => {
+      if (config.proposalTelemetry) {
+        try {
+          supervisor.recordProposal(runKeyOf(event, ctx), { toolName: event.toolName, params: event.params,
+            toolCallId: event.toolCallId ?? ctx?.toolCallId, sessionKey: ctx?.sessionKey });
+        } catch { /* telemetry failure must not bypass the gate */ }
+      }
+      return gate(event, ctx);
+    }, { priority: 100 });
+    writeLog({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
+      ruleIds: (config.control?.rules ?? []).map((rule) => rule.id) });
+
+    // The key can come from the environment so it stays out of openclaw.json.
+    if (!config.endpoint || !apiKey) {
+      writeLog({ error: "xybernetex-openclaw remote observation disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
+                        "(or plugin config `apiKey`) - see README" });
+    }
+
+    // One supervised trajectory = one agent run (a single user turn and all
+    // its tool calls). Falls back to the session when a run id is missing.
     // Nothing is returned, and OpenClaw runs after_tool_call fire-and-forget,
     // so the agent never waits on the supervisor.
     api.on("after_tool_call", (event: any, ctx: any) => {
@@ -74,6 +77,7 @@ export default {
         toolName: event.toolName,
         params: event.params,
         error: event.error,
+        toolCallId: event.toolCallId ?? ctx?.toolCallId,
         sessionKey: ctx?.sessionKey,
       });
     });

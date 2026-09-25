@@ -8,6 +8,10 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "proposalTelemetry": {
+        "type": "boolean", "default": false,
+        "description": "Record hashed pending calls locally using the alpha v2 schema. No remote inference or learned enforcement."
+      },
       "control": {
         "type": "object",
         "additionalProperties": false,

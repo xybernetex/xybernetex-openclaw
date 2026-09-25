@@ -4,6 +4,7 @@ Temporarily restricts exec for the scenarios agent only; restores the previous
 control configuration in finally. Makes two paid agent calls. Requires a live
 gateway with automatic configuration reload and the linked plugin installed.
 """
+import argparse
 import json
 from pathlib import Path
 import shutil
@@ -13,6 +14,9 @@ import uuid
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--proposals", action="store_true", help="Temporarily enable and verify pending-call telemetry")
+    args = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     home = Path.home() / ".openclaw"
     config = json.loads((home / "openclaw.json").read_text(encoding="utf-8"))
@@ -24,6 +28,8 @@ def main():
     plugin_config = config["plugins"]["entries"]["xybernetex-openclaw"].get("config", {})
     previous = plugin_config.get("control")
     had_control = "control" in plugin_config
+    previous_telemetry = plugin_config.get("proposalTelemetry")
+    had_telemetry = "proposalTelemetry" in plugin_config
     log_path = Path(plugin_config.get("logPath", home / "xybernetex-supervisor.jsonl"))
     shim = shutil.which("openclaw")
     if not shim:
@@ -36,6 +42,7 @@ def main():
     # Contains only this plugin's control settings, never credentials.
     (output / "restore-control.json").write_text(json.dumps({"present": had_control, "value": previous}),
                                                 encoding="utf-8")
+    (output / "restore-telemetry.json").write_text(json.dumps({"present": had_telemetry, "value": previous_telemetry}), encoding="utf-8")
 
     def cli(args, timeout=60):
         proc = subprocess.run(oc + args, capture_output=True, text=True, encoding="utf-8",
@@ -61,17 +68,23 @@ def main():
         else:
             cli(["config", "unset", "plugins.entries.xybernetex-openclaw.config.control"])
 
-    def wait_ready(offset, mode, ids):
-        deadline = time.monotonic() + 60
+    def wait_ready(offset, mode, ids, telemetry=None):
+        deadline = time.monotonic() + 180
         while time.monotonic() < deadline:
             if any(e.get("type") == "tool_gate_ready" and e.get("mode") == mode and
-                   e.get("ruleIds") == ids for e in logs()[offset:]):
+                   e.get("ruleIds") == ids and (telemetry is None or e.get("proposalTelemetry") is telemetry)
+                   for e in logs()[offset:]):
                 return
             time.sleep(1)
         raise RuntimeError("Gateway did not confirm loading the new gate configuration")
 
     results = []
     try:
+        if args.proposals:
+            offset = len(logs())
+            cli(["config", "set", "plugins.entries.xybernetex-openclaw.config.proposalTelemetry", "true", "--strict-json"])
+            initial = previous or {}
+            wait_ready(offset, initial.get("mode", "observe"), [r["id"] for r in initial.get("rules", [])], True)
         for mode in ("observe", "enforce"):
             rule_id = batch + "-" + mode
             offset = len(logs())
@@ -79,7 +92,7 @@ def main():
                 {"id": rule_id, "agentId": "scenarios", "toolName": "exec"}]}
             print(f"Loading {mode} gate for scenarios only...", flush=True)
             set_control(control)
-            wait_ready(offset, mode, [rule_id])
+            wait_ready(offset, mode, [rule_id], True if args.proposals else None)
             relative = f"runs/{batch}/{mode}"
             folder = (workspace / relative).resolve()
             if not folder.is_relative_to(workspace):
@@ -116,6 +129,18 @@ def main():
             result["passed"] = bool(events) and result["recovered"] and (
                 result["protected_unchanged"] and result["enforced_events"] > 0 if mode == "enforce"
                 else not result["protected_exists"] and result["enforced_events"] == 0)
+            if args.proposals:
+                captured = [e for e in logs()[offset:] if e.get("sessionKey") == session]
+                proposals = [e for e in captured if e.get("type") == "tool_proposal"]
+                (output / f"{mode}-telemetry.jsonl").write_text("".join(json.dumps(e) + "\n" for e in captured), encoding="utf-8")
+                result["proposals"] = len(proposals)
+                result["proposal_ids_present"] = all(e.get("snapshot", {}).get("proposed_call", {}).get("tool_call_id") for e in proposals)
+                result["proposal_contract_valid"] = bool(proposals) and all(
+                    e["snapshot"].get("feature_schema") == "xybernetex.state.v2" and
+                    not ({"success", "error", "timed_out"} & e["snapshot"]["proposed_call"].keys())
+                    for e in proposals)
+                result["exec_proposed"] = any(e["snapshot"]["proposed_call"]["tool_name"] == "exec" for e in proposals)
+                result["passed"] = result["passed"] and result["proposal_contract_valid"] and result["exec_proposed"]
             results.append(result)
             print(json.dumps(result), flush=True)
             if not result["passed"]:
@@ -123,10 +148,21 @@ def main():
     finally:
         print("Restoring previous control configuration...", flush=True)
         offset = len(logs())
+        if args.proposals:
+            path = "plugins.entries.xybernetex-openclaw.config.proposalTelemetry"
+            cli(["config", "set", path, json.dumps(previous_telemetry), "--strict-json"] if had_telemetry else ["config", "unset", path])
+            # Let this lifecycle operation finish before changing control again.
+            deadline = time.monotonic() + 180
+            while time.monotonic() < deadline:
+                ready = [e for e in logs()[offset:] if e.get("type") == "tool_gate_ready"]
+                if ready and ready[-1].get("proposalTelemetry") is (previous_telemetry is True):
+                    break
+                time.sleep(1)
+            offset = len(logs())
         set_control(previous, had_control)
         restored = previous or {}
         wait_ready(offset, restored.get("mode", "observe"),
-                   [r["id"] for r in restored.get("rules", [])])
+                   [r["id"] for r in restored.get("rules", [])], previous_telemetry is True if args.proposals else None)
         (output / "results.json").write_text(json.dumps({"results": results, "restored": True}, indent=2),
                                              encoding="utf-8")
         print(f"Restored. Results: {output / 'results.json'}", flush=True)

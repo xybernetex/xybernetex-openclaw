@@ -1,5 +1,10 @@
 # Xybernetex Supervisor for OpenClaw
 
+See [ALPHA.md](ALPHA.md) for the current alpha contract, implementation stages,
+and measured limitations. Pending-call telemetry is opt-in with
+`proposalTelemetry: true`; it writes local v2 proposal records without changing
+the deployed v1 model or enforcing learned decisions.
+
 An [OpenClaw](https://github.com/openclaw/openclaw) plugin that watches an
 agent's tool calls and records what a trained supervisor policy would do at
 each step: continue, replan, block the action, ask the user, inject

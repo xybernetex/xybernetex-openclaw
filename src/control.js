@@ -54,7 +54,7 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {} } 
     const metadata = { gateId: randomUUID(), mode, ruleId: rule.id, enforced,
       runKey: event.runId ?? ctx?.runId ?? ctx?.sessionKey ?? "unknown",
       sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
-      toolCallId: event.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params),
+      toolCallId: event.toolCallId ?? ctx?.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params),
       // riskTier is null whenever the rule matched purely on paramsMatch
       // (no riskAtLeast), since then risk.js's opinion wasn't consulted.
       riskTier: rule.riskAtLeast !== undefined ? riskTier : null };
