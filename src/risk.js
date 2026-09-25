@@ -141,8 +141,22 @@ function classifySegment(segment, rawCommand) {
   return "none";
 }
 
+// "none" < "sensitive" < "destructive". Exported so callers (control.js's
+// riskAtLeast rules) can compare tiers without duplicating the ordering.
+export const RISK_LEVELS = Object.freeze(["none", "sensitive", "destructive"]);
 const SEVERITY = { none: 0, sensitive: 1, destructive: 2 };
 const worst = (a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a);
+
+// tier is classifyToolCall's return value: "none" | "sensitive" |
+// "destructive" | null (unknown tool - this repo's classifier has no
+// opinion). null never meets a threshold: an enforcement rule that can't
+// locally verify a call's risk must not fire on it.
+export function meetsRiskThreshold(tier, threshold) {
+  if (!Object.hasOwn(SEVERITY, threshold)) {
+    throw new Error(`riskAtLeast must be one of ${RISK_LEVELS.join(", ")}, got ${JSON.stringify(threshold)}`);
+  }
+  return tier !== null && SEVERITY[tier] >= SEVERITY[threshold];
+}
 
 export function classifyShellCommand(command) {
   if (typeof command !== "string" || !command.trim()) return "none";

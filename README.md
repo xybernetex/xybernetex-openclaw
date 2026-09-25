@@ -36,7 +36,36 @@ to apply. Keep rule IDs unique.
 An optional `paramsMatch` object restricts a rule to exact, case-sensitive
 matches on specified string parameters, for example
 `"paramsMatch": {"command": "rm /workspace/example.txt"}`. Extra parameters
-are permitted. These are tool-call restrictions, **not filesystem protection**:
+are permitted.
+
+An optional `riskAtLeast: "sensitive"` or `"destructive"` instead restricts a
+rule to calls `src/risk.js` classifies at or above that tier - the same
+classifier the observation path (`supervisor.js`) already uses, e.g. one
+`exec` rule that blocks **any** destructive shell command (`rm -rf`,
+`git reset --hard`, `DROP TABLE`, ...) rather than one exact command:
+
+```json
+{"id": "no-destructive-exec", "agentId": "scenarios", "toolName": "exec", "riskAtLeast": "destructive"}
+```
+
+`paramsMatch` and `riskAtLeast` combine (a rule with both needs both to
+match) when a rule sets both. A tool `risk.js` doesn't know how to judge
+(an MCP tool, a plugin-provided tool) never satisfies `riskAtLeast`, even in
+`enforce` mode - the rule is skipped for that call rather than guessing.
+`risk.js` is a heuristic for a supervisor that mostly only observes; see its
+own module docstring. `riskTier` (the classification that decided the
+match, or `null` when the rule matched on `paramsMatch` alone) is logged on
+every `tool_gate` entry.
+
+**`riskAtLeast` does not know intent.** `risk.js` classifies what an
+operation *does* (deletes something, reaches outside the machine), not
+whether the user authorized it - a rule blocking destructive `exec` calls
+blocks a user-requested cleanup exactly as readily as an unwanted one. Scope
+`agentId` and `toolName`/`paramsMatch` to the situations where that
+trade-off is acceptable; this is a blunt, explicit restriction, not a
+judgment about what the user wanted.
+
+These are tool-call restrictions, **not filesystem protection**:
 another tool, a differently formatted command, or a delegated agent may perform
 the same operation. A blocked call tells the agent not to circumvent the rule,
 but this instruction is not an access-control boundary. Use the sandbox and

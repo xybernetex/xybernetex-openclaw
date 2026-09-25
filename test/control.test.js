@@ -50,8 +50,55 @@ test("invalid rules fail explicitly and configuration is copied", () => {
   assert.throws(() => createToolGate({ rules: [{}] }));
   assert.throws(() => createToolGate({ rules: [rule, rule] }));
   assert.throws(() => createToolGate({ rules: [{ ...rule, paramsMatch: { command: 1 } }] }));
+  assert.throws(() => createToolGate({ rules: [{ ...rule, riskAtLeast: "none" }] }));
+  assert.throws(() => createToolGate({ rules: [{ ...rule, riskAtLeast: "catastrophic" }] }));
   const mutable = { ...rule, paramsMatch: { ...rule.paramsMatch } };
   const gate = createToolGate({ mode: "enforce", rules: [mutable] });
   mutable.paramsMatch.command = "changed";
   assert.equal(gate(event, ctx).block, true);
+});
+
+// riskAtLeast: the same classifier src/risk.js gives the observe-only
+// path, now consulted by the enforcement gate.
+const riskyRule = { id: "no-destructive-exec", agentId: "scenarios", toolName: "exec", riskAtLeast: "destructive" };
+
+test("riskAtLeast matches any command risk.js classifies at or above the threshold, not just one", () => {
+  const gate = createToolGate({ mode: "enforce", rules: [riskyRule] });
+  assert.equal(gate({ toolName: "exec", params: { command: "rm -rf build" } }, ctx).block, true);
+  assert.equal(gate({ toolName: "exec", params: { command: "Remove-Item -Recurse C:\\data" } }, ctx).block, true);
+  // Below the threshold: sensitive and none both pass through.
+  assert.equal(gate({ toolName: "exec", params: { command: "git push origin main" } }, ctx), undefined);
+  assert.equal(gate({ toolName: "exec", params: { command: "python test.py" } }, ctx), undefined);
+});
+
+test("riskAtLeast: sensitive threshold also catches destructive (tiers are ordered)", () => {
+  const gate = createToolGate({ mode: "enforce", rules: [{ ...riskyRule, riskAtLeast: "sensitive" }] });
+  assert.equal(gate({ toolName: "exec", params: { command: "git push" } }, ctx).block, true);
+  assert.equal(gate({ toolName: "exec", params: { command: "rm -rf build" } }, ctx).block, true);
+  assert.equal(gate({ toolName: "exec", params: { command: "python test.py" } }, ctx), undefined);
+});
+
+test("riskAtLeast never fires for a tool risk.js can't judge, even in enforce mode", () => {
+  const gate = createToolGate({ mode: "enforce",
+    rules: [{ id: "no-mcp-risk", agentId: "scenarios", toolName: "some_mcp_tool", riskAtLeast: "sensitive" }] });
+  assert.equal(gate({ toolName: "some_mcp_tool", params: { anything: "x" } }, ctx), undefined);
+});
+
+test("riskAtLeast combines with paramsMatch: both conditions must hold", () => {
+  const gate = createToolGate({ mode: "enforce",
+    rules: [{ ...riskyRule, riskAtLeast: "sensitive", paramsMatch: { command: "git push origin main" } }] });
+  assert.equal(gate({ toolName: "exec", params: { command: "git push origin main" } }, ctx).block, true);
+  // Matches params but not the risk threshold.
+  assert.equal(gate({ toolName: "exec", params: { command: "git status" } }, ctx), undefined);
+});
+
+test("the matched risk tier is logged, and only when riskAtLeast actually decided the match", () => {
+  const logs = [];
+  const gate = createToolGate({ mode: "enforce", rules: [riskyRule], log: (e) => logs.push(e) });
+  gate({ toolName: "exec", params: { command: "rm -rf build" } }, ctx);
+  assert.equal(logs[0].riskTier, "destructive");
+
+  const paramsOnlyGate = createToolGate({ mode: "enforce", rules: [rule], log: (e) => logs.push(e) });
+  paramsOnlyGate(event, ctx);
+  assert.equal(logs[1].riskTier, null);
 });

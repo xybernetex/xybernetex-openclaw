@@ -1,7 +1,12 @@
 // Local, explicit restrictions on pending calls. This is independent of the
 // learned, post-execution policy and never waits for a remote service.
 import { hashParams } from "./supervisor.js";
+import { classifyToolCall, meetsRiskThreshold, RISK_LEVELS } from "./risk.js";
 import { randomUUID } from "node:crypto";
+
+// "none" would match every call (paramsMatch: {} already does that), so it's
+// not a meaningful threshold to configure - only the two elevated tiers are.
+const RISK_THRESHOLDS = RISK_LEVELS.filter((level) => level !== "none");
 
 export function createToolGate({ mode = "observe", rules = [], log = () => {} } = {}) {
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
@@ -28,13 +33,20 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {} } 
         Object.values(match).some((v) => typeof v !== "string")) {
       throw new Error("control rule paramsMatch must contain string values");
     }
+    if (rule.riskAtLeast !== undefined && !RISK_THRESHOLDS.includes(rule.riskAtLeast)) {
+      throw new Error(`control rule riskAtLeast must be one of ${RISK_THRESHOLDS.join(", ")}`);
+    }
     return { ...rule, action, approvalTimeoutMs, paramsMatch: { ...match } };
   });
 
   return (event, ctx) => {
+    // Classified once per event: risk.js judges from the tool name and
+    // params, the same inputs every rule for this tool call shares.
+    const riskTier = classifyToolCall(event?.toolName, event?.params);
     const matches = compiled.filter((r) => r.agentId === ctx?.agentId && r.toolName === event?.toolName &&
       Object.entries(r.paramsMatch).every(([key, value]) =>
-        Object.hasOwn(event.params ?? {}, key) && event.params[key] === value));
+        Object.hasOwn(event.params ?? {}, key) && event.params[key] === value) &&
+      (r.riskAtLeast === undefined || meetsRiskThreshold(riskTier, r.riskAtLeast)));
     // A broad approval must never override an overlapping explicit prohibition.
     const rule = matches.find((r) => r.action === "block") ?? matches[0];
     if (!rule) return;
@@ -42,7 +54,10 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {} } 
     const metadata = { gateId: randomUUID(), mode, ruleId: rule.id, enforced,
       runKey: event.runId ?? ctx?.runId ?? ctx?.sessionKey ?? "unknown",
       sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
-      toolCallId: event.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params) };
+      toolCallId: event.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params),
+      // riskTier is null whenever the rule matched purely on paramsMatch
+      // (no riskAtLeast), since then risk.js's opinion wasn't consulted.
+      riskTier: rule.riskAtLeast !== undefined ? riskTier : null };
     const safeLog = (entry) => { try { log({ ...metadata, ...entry }); } catch { /* keep the gate */ } };
     // Log metadata and hashes, never raw command text or tool parameters.
     // Logging failure must not turn an explicit denial into an allowed call.
@@ -64,8 +79,9 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {} } 
     };
     if (enforced) return {
       block: true,
-      blockReason: `Xybernetex rule '${rule.id}' prohibits this tool call. It was not executed. ` +
-        "Do not retry or perform the prohibited operation through another tool. " +
+      blockReason: `Xybernetex rule '${rule.id}' prohibits this tool call` +
+        (rule.riskAtLeast !== undefined ? ` (classified ${riskTier}, at or above the rule's ${rule.riskAtLeast} threshold)` : "") +
+        ". It was not executed. Do not retry or perform the prohibited operation through another tool. " +
         "Continue any permitted work and explain the restriction to the user.",
     };
   };
