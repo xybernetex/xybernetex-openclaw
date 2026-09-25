@@ -47,8 +47,67 @@ a reason the agent can act on. It is synchronous, has no network dependency,
 and logging failures do not lift a denial. Invalid rules fail registration;
 ensure the plugin is loaded before relying on them. Startup and gate events
 are separate from post-execution policy observations. Only hashes of tool
-parameters are logged. No learned decision is enforced, and no approval,
-replanning, parameter rewriting, or run termination is implemented yet.
+parameters are logged. No learned decision is enforced; replanning, parameter
+rewriting, and run termination are not implemented yet.
+
+### Approve one pending call
+
+Use `action: "approve"` on a rule to ask through OpenClaw's native approval
+flow. The default rule action is still `block`. For example:
+
+```json
+{
+  "mode": "enforce",
+  "rules": [{
+    "id": "review-test-delete",
+    "agentId": "scenarios",
+    "toolName": "exec",
+    "paramsMatch": { "command": "rm /workspace/disposable.txt" },
+    "action": "approve",
+    "approvalDescription": "Delete the disposable test file /workspace/disposable.txt. This removes that file.",
+    "approvalTimeoutMs": 120000
+  }]
+}
+```
+
+The configured description must identify the action, target, and consequence.
+Keep it accurate for **all** calls the rule matches; use narrowly scoped exact
+parameters where needed. The plugin does not copy raw parameters into approval
+prompts, because they may contain credentials. A fingerprint identifies the
+specific call without exposing its contents. Never treat that fingerprint as
+a substitute for understanding the described operation.
+
+OpenClaw holds the call before execution and binds the approval to its parameter
+snapshot. Only **allow-once** and **deny** are offered; the plugin stores no
+standing permission. A later matching call asks again. A matching block rule
+always wins over approval regardless of rule order. Among overlapping approval
+rules, the first configured match supplies the prompt.
+
+Use a connected OpenClaw approval UI, or inspect and resolve the pending request:
+
+```sh
+openclaw approvals pending
+openclaw approvals resolve <request-id> allow-once
+openclaw approvals resolve <request-id> deny
+```
+
+Timeout, cancellation, missing approval routing, and denial do not authorize
+execution. A missing approval route may deny immediately rather than wait.
+Ensure a reviewing surface is connected before running an approval test.
+`tool_gate_resolution` logs are correlated to the request by `gateId`, tool-call
+identity and parameter hash. An allowed resolution is permission, not proof
+that the tool eventually executed successfully. In observe mode, approval
+rules only log `WOULD_REQUEST_USER` and do not pause the agent.
+
+`python scripts/approval_smoke.py` tests two successive identical calls (allow
+the first, deny the second), timeout, and cancellation in the live sandbox.
+It uses a **test-only automated reviewer**, scoped to unique test sessions and
+descriptions; it never resolves unrelated approvals. It also checks rejection
+of persistent approval and verifies filesystem effects. This exercises the
+Gateway approval flow, not the usability of a human approval interface.
+Results include the installed OpenClaw version, plugin Git revision, and gate
+source hash. Settings are restored afterward. The reviewer currently uses an
+installed OpenClaw runtime adapter and fails if that private adapter changes.
 
 ### Live control check
 

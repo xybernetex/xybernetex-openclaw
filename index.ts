@@ -18,7 +18,8 @@ type Config = {
   logPath?: string;
   control?: {
     mode?: "observe" | "enforce";
-    rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string> }>;
+    rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string>;
+      action?: "block" | "approve"; approvalDescription?: string; approvalTimeoutMs?: number }>;
   };
 };
 
