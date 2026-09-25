@@ -1,15 +1,18 @@
 {
   "name": "@xybernetex/openclaw",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "peerDependencies": {
-    "openclaw": ">=2026.9.5"
+    "openclaw": ">=2026.3.22"
   },
   "openclaw": {
     "extensions": ["./index.ts"],
     "compat": {
-      "pluginApi": ">=2026.9.5",
-      "minGatewayVersion": "2026.9.5"
+      "pluginApi": ">=2026.3.22",
+      "minGatewayVersion": "2026.3.22"
     }
   }
 }

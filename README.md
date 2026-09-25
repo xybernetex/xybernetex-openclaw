@@ -1,34 +1,40 @@
-# Xybernetex for OpenClaw
+# Xybernetex Supervisor for OpenClaw
 
-An [OpenClaw](https://github.com/openclaw/openclaw) plugin that keeps a
-tracked estimate calibrated to reality over time, instead of letting it
-drift the way a model's own running commentary tends to.
+An [OpenClaw](https://github.com/openclaw/openclaw) plugin that watches an
+agent's tool calls and records what a trained supervisor policy would do at
+each step: continue, replan, block the action, ask the user, inject
+context, or stop.
 
-Most agent loops that ask a model to "give me your current best estimate"
-every so often will happily restate whatever it said last time, echo a
-template verbatim, or anchor on the wrong number in a busy context. This
-plugin runs a lightweight correction step on top of that estimate using
-OpenClaw's own hook system - no fork, no change to how OpenClaw reasons or
-calls tools, just a governed feedback signal layered on top.
+**This release only observes.** It never blocks, modifies, or delays
+anything the agent does. Its job is to log real trajectories and the
+policy's decisions on them, so the policy can be checked against real use
+before any decision is enforced.
 
-## What's in this repo
+## How it works
 
-A small, self-contained demo: a synthetic "reservoir monitor" scenario.
-Every heartbeat tick, the plugin:
+After every completed tool call (`after_tool_call`), the plugin:
 
-1. Generates a noisy sensor reading of a (synthetic) declining value.
-2. Injects that reading plus the current estimate into the heartbeat's
-   context via `heartbeat_prompt_contribution`.
-3. Reads the model's reply via `before_agent_finalize`, parses its numeric
-   estimate, and applies a smoothing correction against the running value.
-4. Logs every tick (`~/.openclaw/xybernetex-openclaw.log.jsonl`) so you can
-   watch the estimate track the true value over time.
+1. Adds the call to that agent run's history: tool name, a hash of its
+   params, and whether it failed or timed out.
+2. Sends the run's recent state (last 8 tool calls, the policy's last 16
+   decisions, step count, and cost against budget) to the Xybernetex policy
+   endpoint.
+3. Logs the snapshot and the decision to
+   `~/.openclaw/xybernetex-supervisor.jsonl`.
 
-The correction step here is a simple exponential smoothing average -
-intentionally minimal, so the mechanism (inject context, read the reply,
-correct, feed forward) is easy to follow end to end. Swapping in a more
-capable correction model is the natural next step; this repo is the
-reference implementation of the plugin side of that, not the model itself.
+The agent never waits on any of this: OpenClaw runs `after_tool_call`
+fire-and-forget, and each run's requests are queued so every evaluation
+sees the decisions before it.
+
+**Privacy.** Tool params never leave your machine. The policy only needs to
+know whether two calls were identical (its loop detector), so the plugin
+sends a hash of each call's params instead. Tool names, success/failure,
+and step/cost counts are sent.
+
+**Cost.** With token usage visible (see the optional grant below), cost is
+tokens spent in the run against `tokenBudgetPerRun`. Without it, cost is
+tool calls against `maxToolCallsPerRun`. Each log line records which one
+was used as `costBasis`.
 
 ## Install
 
@@ -37,34 +43,53 @@ git clone https://github.com/xybernetex/xybernetex-openclaw.git
 cd xybernetex-openclaw
 openclaw plugins install --link .
 openclaw plugins enable xybernetex-openclaw
+openclaw config set plugins.entries.xybernetex-openclaw.config.endpoint "https://<your-endpoint>/evaluate"
 ```
 
-Non-bundled plugins that read conversation/reply content need an explicit
-capability grant:
+Set the API key as an environment variable for the gateway process (it
+takes precedence over the `apiKey` config field and keeps the key out of
+`openclaw.json`):
+
+```bash
+export XYBERNETEX_API_KEY=<key>
+```
+
+Optional: let the plugin see token usage (and free per-run memory as soon
+as a run ends) by granting conversation access for `llm_output`/`agent_end`:
 
 ```bash
 openclaw config set plugins.entries.xybernetex-openclaw.hooks.allowConversationAccess true
 ```
 
-## Run the demo
-
-Enable a heartbeat on your agent pointed at this plugin's task:
+Then restart the gateway (`openclaw gateway restart`) and watch decisions
+arrive:
 
 ```bash
-openclaw config set agents.entries.main.heartbeat '{
-  "every": "2m",
-  "target": "none",
-  "timeoutSeconds": 45,
-  "lightContext": true,
-  "isolatedSession": true,
-  "prompt": "This is an automated monitoring check-in. Follow the task instructions provided in context exactly."
-}'
-openclaw gateway restart
-tail -f ~/.openclaw/xybernetex-openclaw.log.jsonl
+tail -f ~/.openclaw/xybernetex-supervisor.jsonl
 ```
 
-Each tick logs `{trueValue, rawEstimate, correctedBelief, relativeError}` -
-watch `correctedBelief` track `trueValue` over successive ticks.
+If `endpoint` or the key is missing, the plugin disables itself and writes
+one line saying so to the log.
+
+## Config
+
+| Key | Default | Meaning |
+|---|---|---|
+| `endpoint` | (required) | Policy endpoint URL, ending in `/evaluate` |
+| `apiKey` | - | Bearer key; `XYBERNETEX_API_KEY` wins if set |
+| `maxToolCallsPerRun` | 50 | Step budget per agent run |
+| `tokenBudgetPerRun` | 1,000,000 | Token budget per run (only with token usage visible) |
+| `logPath` | `~/.openclaw/xybernetex-supervisor.jsonl` | Decision log |
+
+## Test
+
+```bash
+npm test
+```
+
+The supervisor core (`src/supervisor.js`) has no OpenClaw dependency and is
+tested against a fake endpoint; `index.ts` only wires OpenClaw's hooks to
+it. Works with OpenClaw 2026.3.22 and later.
 
 ## License
 

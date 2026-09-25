@@ -1,8 +1,37 @@
 {
   "id": "xybernetex-openclaw",
-  "name": "Xybernetex for OpenClaw",
-  "description": "Keeps a tracked estimate calibrated to reality over time instead of drifting, using OpenClaw's heartbeat and agent-turn hooks.",
+  "name": "Xybernetex Supervisor for OpenClaw",
+  "description": "Observe-only agent supervisor: logs what the Xybernetex policy would do after every tool call, without changing what the agent does.",
   "categories": ["other"],
   "activation": { "onStartup": true },
-  "configSchema": { "type": "object", "additionalProperties": false }
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": {
+        "type": "string",
+        "description": "Full URL of the Xybernetex policy endpoint, e.g. https://<worker>.workers.dev/evaluate"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "Bearer key for the endpoint. Prefer the XYBERNETEX_API_KEY environment variable, which takes precedence."
+      },
+      "maxToolCallsPerRun": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 50,
+        "description": "Step budget per agent run that the policy reasons against."
+      },
+      "tokenBudgetPerRun": {
+        "type": "integer",
+        "minimum": 1,
+        "default": 1000000,
+        "description": "Token budget per agent run, used when token usage is visible (needs allowConversationAccess)."
+      },
+      "logPath": {
+        "type": "string",
+        "description": "JSONL log of every snapshot and decision. Defaults to ~/.openclaw/xybernetex-supervisor.jsonl."
+      }
+    }
+  }
 }
