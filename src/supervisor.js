@@ -1,5 +1,5 @@
-// Observe-only supervisor core: tracks each agent run's tool calls and token
-// spend, asks the Xybernetex policy what it would do after every completed
+// Observe-only supervisor core: tracks each agent run's tool calls, asks the
+// Xybernetex policy what it would do after every completed
 // tool call, and logs the answer. Nothing here changes what the agent does -
 // that's deliberate for this first pass, whose job is to collect real
 // trajectories (and the policy's would-be decisions on them) before any
@@ -42,7 +42,6 @@ export function createSupervisor({
   endpoint,
   apiKey,
   maxToolCallsPerRun = 50,
-  tokenBudgetPerRun = 1_000_000,
   requestTimeoutMs = 5_000,
   maxTrackedRuns = 200,
   fetchImpl = fetch,
@@ -56,50 +55,35 @@ export function createSupervisor({
     if (run) {
       runs.delete(runKey); // re-insert to mark most recently used
     } else {
-      run = { toolCount: 0, toolTail: [], recentActions: [], tokensUsed: 0, sawTokenUsage: false,
-              queue: Promise.resolve() };
+      run = { toolCount: 0, toolTail: [], recentActions: [], queue: Promise.resolve() };
     }
     runs.set(runKey, run);
     while (runs.size > maxTrackedRuns) runs.delete(runs.keys().next().value);
     return run;
   }
 
-  // Token spend per run, when llm_output is visible to the plugin (it needs
-  // OpenClaw's conversation-access grant). Without it, cost falls back to
-  // step count against the step budget - see snapshotFor.
-  function recordTokens(runKey, usage) {
-    const total = usage?.total ?? (usage?.input ?? 0) + (usage?.output ?? 0);
-    if (!Number.isFinite(total) || total <= 0) return;
-    const run = getRun(runKey);
-    run.tokensUsed += total;
-    run.sawTokenUsage = true;
-  }
-
-  function snapshotFor(run, runKey, { step, toolTail, tokensAtStep }) {
-    const cost = run.sawTokenUsage
-      ? { cost_so_far: tokensAtStep, cost_budget: tokenBudgetPerRun, cost_basis: "tokens" }
-      : { cost_so_far: step, cost_budget: maxToolCallsPerRun, cost_basis: "steps" };
+  // Cost is measured in tool calls against the step budget. OpenClaw only
+  // reports token usage once a run has finished (llm_output, as a run total;
+  // model_call_ended carries no token counts as of 2026.9.6), so tokens can't
+  // inform decisions mid-run - index.ts logs the run total for later analysis.
+  function snapshotFor(run, runKey, { step, toolTail }) {
     return {
-      snapshot: {
-        run_id: runKey,
-        objective: "",
-        step_number: step,
-        max_steps: maxToolCallsPerRun,
-        recent_actions: [...run.recentActions],
-        tool_history: toolTail,
-        cost_so_far: cost.cost_so_far,
-        cost_budget: cost.cost_budget,
-        goal_drift_score: null,
-      },
-      costBasis: cost.cost_basis,
+      run_id: runKey,
+      objective: "",
+      step_number: step,
+      max_steps: maxToolCallsPerRun,
+      recent_actions: [...run.recentActions],
+      tool_history: toolTail,
+      cost_so_far: step,
+      cost_budget: maxToolCallsPerRun,
+      goal_drift_score: null,
     };
   }
 
   async function evaluate(run, runKey, atCall) {
-    const { snapshot, costBasis } = snapshotFor(run, runKey, atCall);
+    const snapshot = snapshotFor(run, runKey, atCall);
     const started = now();
-    const entry = { runKey, step: atCall.step, toolName: atCall.toolName, sessionKey: atCall.sessionKey,
-                    costBasis, snapshot };
+    const entry = { runKey, step: atCall.step, toolName: atCall.toolName, sessionKey: atCall.sessionKey, snapshot };
     try {
       const res = await fetchImpl(endpoint, {
         method: "POST",
@@ -137,8 +121,7 @@ export function createSupervisor({
     });
     if (run.toolTail.length > TOOL_TAIL) run.toolTail.shift();
     run.toolCount += 1;
-    const atCall = { step: run.toolCount, toolTail: [...run.toolTail], tokensAtStep: run.tokensUsed,
-                     toolName, sessionKey };
+    const atCall = { step: run.toolCount, toolTail: [...run.toolTail], toolName, sessionKey };
     run.queue = run.queue.then(() => evaluate(run, runKey, atCall));
     return run.queue;
   }
@@ -147,5 +130,5 @@ export function createSupervisor({
     runs.delete(runKey);
   }
 
-  return { recordToolCall, recordTokens, endRun, trackedRuns: () => runs.size };
+  return { recordToolCall, endRun, trackedRuns: () => runs.size };
 }

@@ -14,7 +14,6 @@ type Config = {
   endpoint?: string;
   apiKey?: string;
   maxToolCallsPerRun?: number;
-  tokenBudgetPerRun?: number;
   logPath?: string;
 };
 
@@ -46,7 +45,6 @@ export default {
       endpoint: config.endpoint,
       apiKey,
       maxToolCallsPerRun: config.maxToolCallsPerRun,
-      tokenBudgetPerRun: config.tokenBudgetPerRun,
       log: writeLog,
     });
 
@@ -66,11 +64,12 @@ export default {
       });
     });
 
-    // Token spend. llm_output needs OpenClaw's conversation-access grant; if
-    // it never fires, cost is measured in tool calls instead (logged as
-    // costBasis on every entry).
+    // The run's total token spend, which OpenClaw reports once, after the
+    // run. Logged on its own line (joinable on runKey) for later analysis -
+    // too late to inform any decision in the run. Needs the conversation-
+    // access grant; without it the line is simply never written.
     api.on("llm_output", (event: any, ctx: any) => {
-      supervisor.recordTokens(runKeyOf(event, ctx), event.usage);
+      writeLog({ runKey: runKeyOf(event, ctx), runUsage: event?.usage ?? null, model: event?.model });
     });
 
     // Also needs the conversation-access grant; runs are LRU-evicted

@@ -31,10 +31,10 @@ know whether two calls were identical (its loop detector), so the plugin
 sends a hash of each call's params instead. Tool names, success/failure,
 and step/cost counts are sent.
 
-**Cost.** With token usage visible (see the optional grant below), cost is
-tokens spent in the run against `tokenBudgetPerRun`. Without it, cost is
-tool calls against `maxToolCallsPerRun`. Each log line records which one
-was used as `costBasis`.
+**Cost.** Cost is tool calls against `maxToolCallsPerRun`. OpenClaw only
+reports token usage once a run has finished, too late to inform a decision
+during it, so with conversation access granted (below) the plugin logs each
+run's token total on its own line (`runUsage`, joinable on `runKey`).
 
 ## Install
 
@@ -42,9 +42,13 @@ was used as `costBasis`.
 git clone https://github.com/xybernetex/xybernetex-openclaw.git
 cd xybernetex-openclaw
 openclaw plugins install --link .
-openclaw plugins enable xybernetex-openclaw
+openclaw plugins enable xybernetex-openclaw --accept-capabilities
+openclaw config set plugins.allow '["xybernetex-openclaw"]'
 openclaw config set plugins.entries.xybernetex-openclaw.config.endpoint "https://<your-endpoint>/evaluate"
 ```
+
+(`--accept-capabilities` is the plugin consent step newer OpenClaw
+releases require; drop it on versions that don't recognize it.)
 
 Set the API key as an environment variable for the gateway process (it
 takes precedence over the `apiKey` config field and keeps the key out of
@@ -54,8 +58,10 @@ takes precedence over the `apiKey` config field and keeps the key out of
 export XYBERNETEX_API_KEY=<key>
 ```
 
-Optional: let the plugin see token usage (and free per-run memory as soon
-as a run ends) by granting conversation access for `llm_output`/`agent_end`:
+Optional: grant conversation access so the plugin can log each run's token
+total and free per-run memory as soon as a run ends (`llm_output` /
+`agent_end`). This setting doesn't exist on older OpenClaw releases such as
+2026.3.22, which reject it:
 
 ```bash
 openclaw config set plugins.entries.xybernetex-openclaw.hooks.allowConversationAccess true
@@ -77,8 +83,7 @@ one line saying so to the log.
 |---|---|---|
 | `endpoint` | (required) | Policy endpoint URL, ending in `/evaluate` |
 | `apiKey` | - | Bearer key; `XYBERNETEX_API_KEY` wins if set |
-| `maxToolCallsPerRun` | 50 | Step budget per agent run |
-| `tokenBudgetPerRun` | 1,000,000 | Token budget per run (only with token usage visible) |
+| `maxToolCallsPerRun` | 50 | Tool-call budget per agent run (the policy's step and cost budget) |
 | `logPath` | `~/.openclaw/xybernetex-supervisor.jsonl` | Decision log |
 
 ## Test
@@ -89,7 +94,9 @@ npm test
 
 The supervisor core (`src/supervisor.js`) has no OpenClaw dependency and is
 tested against a fake endpoint; `index.ts` only wires OpenClaw's hooks to
-it. Works with OpenClaw 2026.3.22 and later.
+it. Works with OpenClaw 2026.3.22 and later; verified end to end on
+2026.9.6. On 2026.3.22, runs are keyed by session rather than by run, since
+that release doesn't pass a run id to tool hooks.
 
 ## License
 

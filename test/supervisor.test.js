@@ -81,19 +81,13 @@ test("only the tail the policy reads is sent: 8 tool calls, 16 actions", async (
   assert.equal(snap.recent_actions.length, 16);
 });
 
-test("cost is measured in tokens when usage is visible, steps otherwise", async () => {
+test("cost is tool calls against the per-run budget", async () => {
   const endpoint = fakeEndpoint();
-  const { supervisor, logs } = supervisorWith(endpoint, { maxToolCallsPerRun: 40, tokenBudgetPerRun: 10_000 });
-
-  await supervisor.recordToolCall("steps", { toolName: "t", params: {} });
-  assert.deepEqual([endpoint.requests[0].snapshot.cost_so_far, endpoint.requests[0].snapshot.cost_budget], [1, 40]);
-  assert.equal(logs[0].costBasis, "steps");
-
-  supervisor.recordTokens("tokens", { input: 1200, output: 300 });
-  supervisor.recordTokens("tokens", { total: 500 });
-  await supervisor.recordToolCall("tokens", { toolName: "t", params: {} });
-  assert.deepEqual([endpoint.requests[1].snapshot.cost_so_far, endpoint.requests[1].snapshot.cost_budget], [2000, 10_000]);
-  assert.equal(logs[1].costBasis, "tokens");
+  const { supervisor } = supervisorWith(endpoint, { maxToolCallsPerRun: 40 });
+  supervisor.recordToolCall("r", { toolName: "t", params: {} });
+  await supervisor.recordToolCall("r", { toolName: "t", params: {} });
+  const snap = endpoint.requests[1].snapshot;
+  assert.deepEqual([snap.cost_so_far, snap.cost_budget, snap.max_steps], [2, 40, 40]);
 });
 
 test("endpoint failures are logged and don't advance the action history", async () => {

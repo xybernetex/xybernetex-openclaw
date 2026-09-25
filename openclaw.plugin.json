@@ -20,13 +20,7 @@
         "type": "integer",
         "minimum": 1,
         "default": 50,
-        "description": "Step budget per agent run that the policy reasons against."
-      },
-      "tokenBudgetPerRun": {
-        "type": "integer",
-        "minimum": 1,
-        "default": 1000000,
-        "description": "Token budget per agent run, used when token usage is visible (needs allowConversationAccess)."
+        "description": "Tool-call budget per agent run that the policy reasons against (both its step and cost budget)."
       },
       "logPath": {
         "type": "string",
