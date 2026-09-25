@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 
 import { createSupervisor } from "./src/supervisor.js";
+import { createToolGate } from "./src/control.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -15,12 +16,16 @@ type Config = {
   apiKey?: string;
   maxToolCallsPerRun?: number;
   logPath?: string;
+  control?: {
+    mode?: "observe" | "enforce";
+    rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string> }>;
+  };
 };
 
 export default {
   id: "xybernetex-openclaw",
   name: "Xybernetex Supervisor for OpenClaw",
-  description: "Observe-only agent supervisor: logs what the Xybernetex policy would do after every tool call.",
+  description: "Agent supervisor with observation and opt-in local tool restrictions.",
   register(api: any) {
     const config = (api.pluginConfig ?? {}) as Config;
     const logPath = config.logPath ?? DEFAULT_LOG_PATH;
@@ -33,10 +38,17 @@ export default {
       }
     };
 
+    // Register the local gate even if remote observation is unavailable.
+    // No endpoint failure can disable configured restrictions.
+    const gate = createToolGate({ ...config.control, log: writeLog });
+    api.on("before_tool_call", gate, { priority: 100 });
+    writeLog({ type: "tool_gate_ready", mode: config.control?.mode ?? "observe",
+      ruleIds: (config.control?.rules ?? []).map((rule) => rule.id) });
+
     // The key can come from the environment so it stays out of openclaw.json.
     const apiKey = process.env.XYBERNETEX_API_KEY ?? config.apiKey;
     if (!config.endpoint || !apiKey) {
-      writeLog({ error: "xybernetex-openclaw disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
+      writeLog({ error: "xybernetex-openclaw remote observation disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
                         "(or plugin config `apiKey`) - see README" });
       return;
     }

@@ -1,13 +1,38 @@
 {
   "id": "xybernetex-openclaw",
   "name": "Xybernetex Supervisor for OpenClaw",
-  "description": "Observe-only agent supervisor: logs what the Xybernetex policy would do after every tool call, without changing what the agent does.",
+  "description": "Agent supervisor with observation and opt-in local tool restrictions.",
   "categories": ["other"],
   "activation": { "onStartup": true },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "control": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": { "type": "string", "enum": ["observe", "enforce"], "default": "observe" },
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "agentId", "toolName"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "agentId": { "type": "string", "minLength": 1 },
+                "toolName": { "type": "string", "minLength": 1 },
+                "paramsMatch": {
+                  "type": "object",
+                  "additionalProperties": { "type": "string" },
+                  "description": "Exact, case-sensitive matches on the specified string parameters. Omit to match every call to this tool for the selected agent."
+                }
+              }
+            }
+          }
+        }
+      },
       "endpoint": {
         "type": "string",
         "description": "Full URL of the Xybernetex policy endpoint, e.g. https://<worker>.workers.dev/evaluate"

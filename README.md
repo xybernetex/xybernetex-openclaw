@@ -5,10 +5,69 @@ agent's tool calls and records what a trained supervisor policy would do at
 each step: continue, replan, block the action, ask the user, inject
 context, or stop.
 
-**This release only observes.** It never blocks, modifies, or delays
-anything the agent does. Its job is to log real trajectories and the
-policy's decisions on them, so the policy can be checked against real use
-before any decision is enforced.
+**Observation is the default.** The learned policy still only observes.
+Optional local rules can now block explicitly prohibited calls before they
+execute. These rules operate independently of the remote policy endpoint.
+
+## First control version
+
+Set `plugins.entries.xybernetex-openclaw.config.control` to an object such as:
+
+```json
+{
+  "mode": "enforce",
+  "rules": [
+    {
+      "id": "no-shell-in-scenarios",
+      "agentId": "scenarios",
+      "toolName": "exec"
+    }
+  ]
+}
+```
+
+This example prohibits **every exec call for the scenarios agent**. Other
+agents and tools are unaffected. Use `mode: "observe"` to log `WOULD_BLOCK`
+without blocking anything. Omitting `control` defaults to observation with
+no restrictions. After changing configuration, confirm a `tool_gate_ready`
+entry in the log; the running gateway must reload the plugin for changes
+to apply. Keep rule IDs unique.
+
+An optional `paramsMatch` object restricts a rule to exact, case-sensitive
+matches on specified string parameters, for example
+`"paramsMatch": {"command": "rm /workspace/example.txt"}`. Extra parameters
+are permitted. These are tool-call restrictions, **not filesystem protection**:
+another tool, a differently formatted command, or a delegated agent may perform
+the same operation. A blocked call tells the agent not to circumvent the rule,
+but this instruction is not an access-control boundary. Use the sandbox and
+host permissions for that boundary.
+
+The gate uses OpenClaw's `before_tool_call` hook, returning `block: true` and
+a reason the agent can act on. It is synchronous, has no network dependency,
+and logging failures do not lift a denial. Invalid rules fail registration;
+ensure the plugin is loaded before relying on them. Startup and gate events
+are separate from post-execution policy observations. Only hashes of tool
+parameters are logged. No learned decision is enforced, and no approval,
+replanning, parameter rewriting, or run termination is implemented yet.
+
+### Live control check
+
+With the configured Docker-sandboxed `scenarios` agent and a running gateway:
+
+```sh
+python scripts/control_smoke.py
+```
+
+This makes two paid agent calls, temporarily changes only the plugin's
+control configuration, and waits for confirmation that the gateway loaded
+each mode. It compares observe versus enforce on disposable test files,
+checks that permitted work continues, and restores the prior control settings
+in `finally`. Results and a control-only recovery record are saved under
+`out/control-*/`. If the process is forcibly killed, use that recovery record
+to restore settings manually. The test requires Node and Python on PATH and
+the current npm-installed OpenClaw layout. Live hook behavior was checked on
+OpenClaw 2026.9.6; older supported observation versions are not a control
+compatibility guarantee.
 
 ## How it works
 
