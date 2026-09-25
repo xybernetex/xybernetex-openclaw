@@ -77,6 +77,13 @@ tail -f ~/.openclaw/xybernetex-supervisor.jsonl
 If `endpoint` or the key is missing, the plugin disables itself and writes
 one line saying so to the log.
 
+**Run agents through the gateway.** As of OpenClaw 2026.9.6, the local
+terminal chat (`openclaw chat`, i.e. `openclaw tui --local`) loads the
+plugin but never delivers tool-call events to it, so nothing is logged.
+Everything that runs through the gateway works: `openclaw tui` (no
+`--local`), the dashboard, chat channels, and `openclaw agent`. So does
+`openclaw agent --local`.
+
 ## Config
 
 | Key | Default | Meaning |
