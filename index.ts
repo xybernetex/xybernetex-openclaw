@@ -1,4 +1,7 @@
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+// No openclaw/plugin-sdk import on purpose: a plugin linked from outside
+// OpenClaw's own install can't always resolve that package (it failed on
+// 2026.3.22), and OpenClaw's loader accepts a plain { id, register } object
+// in every version from 2026.3.22 through 2026.9.6 anyway.
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
@@ -15,11 +18,11 @@ type Config = {
   logPath?: string;
 };
 
-export default definePluginEntry({
+export default {
   id: "xybernetex-openclaw",
   name: "Xybernetex Supervisor for OpenClaw",
   description: "Observe-only agent supervisor: logs what the Xybernetex policy would do after every tool call.",
-  register(api) {
+  register(api: any) {
     const config = (api.pluginConfig ?? {}) as Config;
     const logPath = config.logPath ?? DEFAULT_LOG_PATH;
     const writeLog = (entry: Record<string, unknown>) => {
@@ -76,4 +79,4 @@ export default definePluginEntry({
       supervisor.endRun(runKeyOf(event, ctx));
     });
   },
-});
+};
