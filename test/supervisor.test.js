@@ -42,6 +42,17 @@ test("params are hashed independent of key order, and never sent raw", async () 
   assert.deepEqual(req.snapshot.tool_history[0].params, { h: hashParams({ path: "/secret/notes.txt", body: "hunter2" }) });
 });
 
+test("risk is judged from the raw params, and only the label is sent", async () => {
+  const endpoint = fakeEndpoint();
+  const { supervisor } = supervisorWith(endpoint);
+  supervisor.recordToolCall("r", { toolName: "exec", params: { command: "python run_tests.py" } });
+  supervisor.recordToolCall("r", { toolName: "exec", params: { command: "Remove-Item -Recurse C:\\data" } });
+  await supervisor.recordToolCall("r", { toolName: "mystery_tool", params: {} });
+  const history = endpoint.requests[2].snapshot.tool_history;
+  assert.deepEqual(history.map((c) => c.risk), ["none", "destructive", undefined]);
+  assert.ok(!endpoint.requests.some((r) => r.rawBody.includes("Remove-Item") || r.rawBody.includes("run_tests")));
+});
+
 test("tool calls become snapshot entries with step numbers and outcomes", async () => {
   const endpoint = fakeEndpoint();
   const { supervisor } = supervisorWith(endpoint, { maxToolCallsPerRun: 30 });

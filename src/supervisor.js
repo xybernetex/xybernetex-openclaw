@@ -9,6 +9,8 @@
 // index.ts only wires OpenClaw's hooks to these methods.
 import { createHash } from "node:crypto";
 
+import { classifyToolCall } from "./risk.js";
+
 // The Worker's features only look at the last 8 tool calls and last 16
 // supervisor actions, so only that tail is ever sent.
 const TOOL_TAIL = 8;
@@ -113,12 +115,17 @@ export function createSupervisor({
   function recordToolCall(runKey, { toolName, params, error, sessionKey }) {
     const run = getRun(runKey);
     const errorText = typeof error === "string" ? error : error ? String(error) : "";
-    run.toolTail.push({
+    const record = {
       tool_name: toolName,
       params: { h: hashParams(params) },
       success: !errorText,
       timed_out: Boolean(errorText) && TIMEOUT_PATTERN.test(errorText),
-    });
+    };
+    // Judged here, from the params, before they're reduced to a hash; left
+    // off for tools risk.js doesn't know, so the server judges the name.
+    const risk = classifyToolCall(toolName, params);
+    if (risk !== null) record.risk = risk;
+    run.toolTail.push(record);
     if (run.toolTail.length > TOOL_TAIL) run.toolTail.shift();
     run.toolCount += 1;
     const atCall = { step: run.toolCount, toolTail: [...run.toolTail], toolName, sessionKey };

@@ -29,7 +29,18 @@ sees the decisions before it.
 **Privacy.** Tool params never leave your machine. The policy only needs to
 know whether two calls were identical (its loop detector), so the plugin
 sends a hash of each call's params instead. Tool names, success/failure,
-and step/cost counts are sent.
+step/cost counts, and a risk label are sent.
+
+**Risk labels.** Before hashing, `src/risk.js` classifies each call from
+what it actually does: `destructive` (e.g. `rm -rf`, `Remove-Item`,
+`git reset --hard`, `DROP TABLE` via a SQL client), `sensitive` (reaches
+outside the machine: `git push`, `npm publish`, `wrangler deploy`, HTTP
+POSTs, sending a message, editing credential files), or `none`. This
+matters most for `exec`, which runs every shell command: judged by name
+alone, running a test suite and deleting a folder look the same. Tools the
+classifier doesn't know are sent without a label and judged by name on the
+server. It's a heuristic for a supervisor that only observes, not a
+security boundary.
 
 **Cost.** Cost is tool calls against `maxToolCallsPerRun`. OpenClaw only
 reports token usage once a run has finished, too late to inform a decision
