@@ -128,6 +128,9 @@ function classifySegment(segment, rawCommand) {
     // installs and removals are local dependency changes.
     if (PACKAGE_MANAGERS.has(cmd)) {
       if (verbs.includes("unpublish")) return "destructive";
+      // --dry-run performs no publish; a fully consequence-free simulation
+      // is indistinguishable from a real one by verb alone (2026-09-25 finding).
+      if (args.includes("--dry-run")) return "none";
       return verbs.some((v) => v === "publish" || v === "deploy") ? "sensitive" : "none";
     }
     if (verbs.some((v) => DESTRUCTIVE_VERBS.has(v))) return "destructive";

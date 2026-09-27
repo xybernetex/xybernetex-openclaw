@@ -14,6 +14,32 @@ context, or stop.
 Optional local rules can now block explicitly prohibited calls before they
 execute. These rules operate independently of the remote policy endpoint.
 
+## Live status (2026-09-27)
+
+The `main` agent (the interactive one; `scenarios`, the automated batch
+harness, is untouched and stays fully observe-only so live scenario batches
+keep running unattended) now runs three `enforce`/`approve` rules -
+`main-destructive-exec-approve`, `main-destructive-terminal-approve`,
+`main-destructive-patch-approve` - each `riskAtLeast: "destructive"`. Any
+shell command or file-delete patch `risk.js` classifies destructive now pauses
+for human approval instead of running or being silently observed. `block`
+was deliberately not used here: `risk.js` classifies what an operation does,
+not whether it was authorized (see "`riskAtLeast` does not know intent"
+below), and full-run1's live data showed roughly 26 legitimate agent
+self-cleanups (`rm todos.json`, `git reset --hard` redoing its own botched
+merge, `DROP TABLE IF EXISTS` before a fresh `CREATE`) get classified
+destructive exactly like an unwanted deletion would. `approve` keeps the same
+guarantee - nothing destructive executes unreviewed - at the cost of one
+click for the legitimate cases, rather than silently killing them. See the
+non-interactive-CLI caveat above: this only reviews meaningfully in an
+interactive session (`main` is used that way); the same rule under a one-shot
+CLI call fails closed with no prompt to answer.
+
+Also fixed same day: `risk.js`'s npm/yarn/pnpm `publish --dry-run` false
+positive (a no-op simulated publish was indistinguishable from a real one by
+verb alone) - the largest remaining false-alarm source found in full-run1's
+scenario grading.
+
 ## First control version
 
 Set `plugins.entries.xybernetex-openclaw.config.control` to an object such as:
@@ -132,6 +158,20 @@ Ensure a reviewing surface is connected before running an approval test.
 identity and parameter hash. An allowed resolution is permission, not proof
 that the tool eventually executed successfully. In observe mode, approval
 rules only log `WOULD_REQUEST_USER` and do not pause the agent.
+
+**Confirmed live (2026-09-27): a one-shot `openclaw agent ...` CLI call has no
+approval-capable surface at all**, and OpenClaw denies immediately with
+`"Plugin approval unavailable: non-interactive CLI runs have no
+approval-capable initiating surface"` - this is exactly what "a missing
+approval route may deny immediately" above means in practice, reproduced with
+`scripts/approval_smoke.py` against OpenClaw 2026.9.6. That script's own
+`allow-once`/`deny` case therefore cannot pass against a one-shot CLI
+invocation; only an interactive surface attached to the running gateway
+(the TUI, or a connected approval UI) can actually present the prompt to a
+human. This is a safe failure mode (destructive calls fail closed, not open)
+but it means an `action: "approve"` rule is only meaningfully reviewed in an
+interactive session - any unattended/CLI/automated run of the same agent will
+simply have every matching call denied, with no prompt anyone can answer.
 
 `python scripts/approval_smoke.py` tests two successive identical calls (allow
 the first, deny the second), timeout, and cancellation in the live sandbox.

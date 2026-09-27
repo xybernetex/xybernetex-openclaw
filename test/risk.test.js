@@ -51,6 +51,7 @@ test("sensitive shell commands reach outside the machine", () => {
   expectAll([
     ["git push origin main", "sensitive"],
     ["npm publish", "sensitive"],
+    ["yarn publish", "sensitive"],
     ["npx wrangler deploy", "sensitive"],
     ["gh pr create --fill", "sensitive"],
     ["docker push registry.example.com/app:1", "sensitive"],
@@ -60,6 +61,15 @@ test("sensitive shell commands reach outside the machine", () => {
     ['Invoke-RestMethod -Uri https://api.example.com -Method "POST" -Body $json', "sensitive"],
     ["Send-MailMessage -To a@b.c -Subject hi", "sensitive"],
     ["taskkill /IM node.exe /F", "sensitive"],
+  ]);
+});
+
+test("npm publish --dry-run is a no-op simulation, not a real publish (2026-09-25 finding)", () => {
+  expectAll([
+    ["npm publish --dry-run", "none"],
+    ["npm publish --access public --dry-run", "none"],
+    ["yarn publish --dry-run", "none"],
+    ["pnpm publish --dry-run", "none"],
   ]);
 });
 
