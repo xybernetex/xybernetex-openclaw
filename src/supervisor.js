@@ -47,6 +47,7 @@ export function createSupervisor({
   requestTimeoutMs = 5_000,
   maxTrackedRuns = 200,
   proposalTelemetry = false,
+  authz = null,
   fetchImpl = fetch,
   log = () => {},
   now = () => Date.now(),
@@ -127,6 +128,11 @@ export function createSupervisor({
     // off for tools risk.js doesn't know, so the server judges the name.
     const risk = classifyToolCall(toolName, params);
     if (risk !== null) record.risk = risk;
+    // Judged against the session as it stood before this call, then the
+    // call's own creations are recorded for later ones. Only the label leaves.
+    const authorization = authz?.label(sessionKey, toolName, params) ?? null;
+    if (authorization !== null) record.authorization = authorization;
+    authz?.recordCompleted(sessionKey, toolName, params, Boolean(errorText));
     run.toolTail.push(record);
     if (run.toolTail.length > TOOL_TAIL) run.toolTail.shift();
     run.toolCount += 1;
@@ -150,6 +156,8 @@ export function createSupervisor({
     const run = getRun(runKey);
     const proposed = { tool_name: toolName, params: { h: hashParams(params) },
       tool_call_id: toolCallId ?? null, risk: classifyToolCall(toolName, params) };
+    const authorization = authz?.label(sessionKey, toolName, params) ?? null;
+    if (authorization !== null) proposed.authorization = authorization;
     const snapshot = { ...snapshotFor(run, runKey, { step: run.toolCount, toolTail: [...run.toolTail] }),
       feature_schema: "xybernetex.state.v2", proposed_call: proposed };
     log({ type: "tool_proposal", runKey, sessionKey, toolCallId, snapshot });

@@ -8,7 +8,9 @@ import { randomUUID } from "node:crypto";
 // not a meaningful threshold to configure - only the two elevated tiers are.
 const RISK_THRESHOLDS = RISK_LEVELS.filter((level) => level !== "none");
 
-export function createToolGate({ mode = "observe", rules = [], log = () => {} } = {}) {
+// authorize(event, ctx) supplies src/authz.js's label for the call. It is
+// logged alongside riskTier only - no rule condition uses it yet.
+export function createToolGate({ mode = "observe", rules = [], log = () => {}, authorize = () => null } = {}) {
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
   if (!Array.isArray(rules)) throw new Error("control.rules must be an array");
   const ids = new Set();
@@ -57,7 +59,8 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {} } 
       toolCallId: event.toolCallId ?? ctx?.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params),
       // riskTier is null whenever the rule matched purely on paramsMatch
       // (no riskAtLeast), since then risk.js's opinion wasn't consulted.
-      riskTier: rule.riskAtLeast !== undefined ? riskTier : null };
+      riskTier: rule.riskAtLeast !== undefined ? riskTier : null,
+      authorization: (() => { try { return authorize(event, ctx) ?? null; } catch { return null; } })() };
     const safeLog = (entry) => { try { log({ ...metadata, ...entry }); } catch { /* keep the gate */ } };
     // Log metadata and hashes, never raw command text or tool parameters.
     // Logging failure must not turn an explicit denial into an allowed call.

@@ -69,8 +69,8 @@ const HTTP_WRITE = /(^|\s)(-X|--request|-Method)\s*['"]?(POST|PUT|PATCH|DELETE)\
 // SQL lives inside quoted arguments, so it's matched against the raw text -
 // but only when a SQL client is invoked, or a commit message saying "drop
 // table support" would read as destructive.
-const SQL_CLIENT = /(^|[\s;&|(])(psql|pgcli|mysql|mariadb|sqlite3?|litecli|sqlcmd|invoke-sqlcmd|duckdb|clickhouse(-client)?|bq|snowsql|cockroach)(\.exe)?(\s|$)/i;
-const SQL_DESTRUCTIVE = /\b(drop\s+(table|database|schema|index|view|user)|truncate\s+(table\s+)?\w|delete\s+from)\b/i;
+export const SQL_CLIENT = /(^|[\s;&|(])(psql|pgcli|mysql|mariadb|sqlite3?|litecli|sqlcmd|invoke-sqlcmd|duckdb|clickhouse(-client)?|bq|snowsql|cockroach)(\.exe)?(\s|$)/i;
+export const SQL_DESTRUCTIVE = /\b(drop\s+(table|database|schema|index|view|user)|truncate\s+(table\s+)?\w|delete\s+from)\b/i;
 
 // Prefixes that run the next word as the real command.
 const WRAPPERS = new Set([

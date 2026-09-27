@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 
 import { createSupervisor } from "./src/supervisor.js";
 import { createToolGate } from "./src/control.js";
+import { createAuthorizationTracker } from "./src/authz.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -42,14 +43,35 @@ export default {
     };
 
     const apiKey = process.env.XYBERNETEX_API_KEY ?? config.apiKey;
-    const supervisor = createSupervisor({ endpoint: config.endpoint, apiKey,
+    const authz = createAuthorizationTracker();
+    const supervisor = createSupervisor({ endpoint: config.endpoint, apiKey, authz,
       maxToolCallsPerRun: config.maxToolCallsPerRun, proposalTelemetry: config.proposalTelemetry, log: writeLog });
     const runKeyOf = (event: any, ctx: any): string =>
       event?.runId ?? ctx?.runId ?? ctx?.sessionKey ?? ctx?.sessionId ?? "unknown";
 
     // Register the local gate even if remote observation is unavailable.
     // No endpoint failure can disable configured restrictions.
-    const gate = createToolGate({ ...config.control, log: writeLog });
+    const gate = createToolGate({ ...config.control, log: writeLog,
+      authorize: (event: any, ctx: any) => authz.label(ctx?.sessionKey, event?.toolName, event?.params) });
+
+    // The user's own turn, before the model reads anything - the only text
+    // src/authz.js accepts as authorization, so instructions planted in files
+    // or tool results can't grant it. Always passes: this hook only observes
+    // here, and a gate hook's unsupported return shape fails closed. Needs
+    // hooks.allowConversationAccess; logs size and provenance, never the text.
+    try {
+      api.on("before_agent_run", (event: any, ctx: any) => {
+        try {
+          const provenance = ctx?.inputProvenance?.kind ?? null;
+          const accepted = authz.setRequest(ctx?.sessionKey, event?.prompt, provenance);
+          writeLog({ type: "authz_request", sessionKey: ctx?.sessionKey, accepted, provenance,
+            chars: typeof event?.prompt === "string" ? event.prompt.length : null });
+        } catch { /* authorization context is best-effort */ }
+        return { outcome: "pass" };
+      });
+    } catch {
+      writeLog({ error: "before_agent_run unavailable on this OpenClaw version: authorization labels disabled" });
+    }
     api.on("before_tool_call", (event: any, ctx: any) => {
       if (config.proposalTelemetry) {
         try {
@@ -92,8 +114,13 @@ export default {
 
     // Also needs the conversation-access grant; runs are LRU-evicted
     // regardless, so this only frees memory sooner.
+    // Authorization context is per session, not per run: a later turn can
+    // confirm an earlier request, and the agent's own files outlive a run.
     api.on("agent_end", (event: any, ctx: any) => {
       supervisor.endRun(runKeyOf(event, ctx));
+    });
+    api.on("session_end", (_event: any, ctx: any) => {
+      if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);
     });
   },
 };

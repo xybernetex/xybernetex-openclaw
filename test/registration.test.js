@@ -28,6 +28,36 @@ test("the actual plugin registers a working gate without a remote endpoint", () 
   }
 });
 
+test("the user's turn labels later risky calls end to end, and its text is never logged", () => {
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-authz-"));
+  try {
+    const hooks = new Map();
+    plugin.register({
+      pluginConfig: { logPath: join(dir, "events.jsonl"), proposalTelemetry: true,
+        control: { mode: "observe", rules: [{ id: "watch", agentId: "main", toolName: "exec", riskAtLeast: "destructive" }] } },
+      on: (name, handler) => hooks.set(name, handler),
+    });
+    const ctx = { runId: "r1", sessionKey: "sess", agentId: "main" };
+    assert.deepEqual(hooks.get("before_agent_run")({ prompt: "Summarize secret-notes.txt, then delete the tmp folder." }, ctx),
+      { outcome: "pass" });
+    hooks.get("before_tool_call")({ toolName: "exec", params: { command: "rm -rf tmp" } }, ctx);
+    hooks.get("before_tool_call")({ toolName: "exec", params: { command: "rm -rf data" } }, ctx);
+    hooks.get("after_tool_call")({ toolName: "exec", params: { command: "rm -rf data" } }, ctx);
+    const raw = readFileSync(join(dir, "events.jsonl"), "utf8");
+    const logs = raw.trim().split("\n").map(JSON.parse);
+    const gates = logs.filter((e) => e.type === "tool_gate");
+    assert.deepEqual(gates.map((e) => e.authorization), ["requested", "unrequested"]);
+    assert.equal(logs.find((e) => e.type === "tool_completed").record.authorization, "unrequested");
+    assert.ok(logs.some((e) => e.type === "authz_request" && e.accepted === true));
+    assert.ok(!raw.includes("secret-notes"));
+    // A gate hook with an unexpected return fails closed, so the handler must
+    // pass even when the event is malformed.
+    assert.deepEqual(hooks.get("before_agent_run")(undefined, undefined), { outcome: "pass" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("opt-in proposal hooks retain completed history and still enforce the gate offline", () => {
   const dir = mkdtempSync(join(tmpdir(), "xybernetex-proposals-"));
   try {
