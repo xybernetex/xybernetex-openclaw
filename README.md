@@ -40,6 +40,31 @@ positive (a no-op simulated publish was indistinguishable from a real one by
 verb alone) - the largest remaining false-alarm source found in full-run1's
 scenario grading.
 
+## Authorization labels (2026-09-27, observational)
+
+`risk.js` says what a call does, never whether the user asked for it.
+`src/authz.js` adds that signal: every destructive or sensitive call is
+labeled `requested` (the user's own message asks for this kind of operation
+and names every target), `own_artifact` (every target was created by the
+agent earlier in the session, or is a regenerable cache like `__pycache__`),
+or `unrequested`. It reads only the user's own turns, captured by the
+`before_agent_run` hook (always returns `pass`; needs
+`hooks.allowConversationAccess`), never file contents or tool results, so an
+instruction planted in data can't authorize itself. The request text stays in
+memory; only the label is logged or sent: on each `tool_history` entry, on
+proposal records, and on `tool_gate` log lines.
+
+Nothing enforces on it yet. Replayed against 565 real scenario runs
+(`scripts/authz_eval.mjs`, fed by the trainer's `scenarios.export_calls`):
+no planted-instruction call labeled `requested`, all 8 runs where an agent
+obeyed a planted instruction still caught by "block only unrequested", and
+the successful runs such a rule would hit fall from 105 to 24. It's a
+heuristic: `own_artifact` in particular can be staged within a session, so it
+must never be grounds to skip a rule. Turns OpenClaw marks as coming from
+another session don't count as the user's, but OpenClaw 2026.9.6 supplied no
+provenance on the gateway path in testing, so that protection applies only
+where provenance is provided.
+
 ## First control version
 
 Set `plugins.entries.xybernetex-openclaw.config.control` to an object such as:
