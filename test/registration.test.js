@@ -109,3 +109,30 @@ test("opt-in proposal hooks retain completed history and still enforce the gate 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a preset alone configures the gate, and each run's end is logged for the report", () => {
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-preset-"));
+  try {
+    const hooks = new Map();
+    plugin.register({
+      pluginConfig: { logPath: join(dir, "events.jsonl"), control: { mode: "enforce", preset: "strict" } },
+      on: (name, handler) => hooks.set(name, handler),
+    });
+    assert.equal(hooks.get("before_tool_call")({ toolName: "exec", params: { command: "rm -rf /data" } },
+      { agentId: "main", sessionKey: "s" }).block, true);
+    hooks.get("agent_end")({ runId: "r1", success: false, error: "incomplete_turn: " + "x".repeat(500), durationMs: 4200 },
+      { agentId: "main", sessionKey: "s" });
+    const logs = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+    const ready = logs.find((e) => e.type === "tool_gate_ready");
+    assert.equal(ready.preset, "strict");
+    assert.deepEqual(ready.ruleIds, ["preset-destructive-block", "preset-sensitive-approve"]);
+    const end = logs.find((e) => e.type === "run_end");
+    assert.equal(end.runKey, "r1");
+    assert.equal(end.success, false);
+    assert.equal(end.durationMs, 4200);
+    assert.equal(end.error.length, 200);
+    assert.equal(end.toolCalls, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

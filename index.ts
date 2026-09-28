@@ -22,6 +22,8 @@ type Config = {
   verifyBeforeFinish?: { agentIds: string[]; instruction?: string; minToolCalls?: number };
   control?: {
     mode?: "observe" | "enforce";
+    preset?: "none" | "recommended" | "strict";
+    // agentId and toolName accept "*"; a toolName of "*" needs riskAtLeast.
     rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string>;
       riskAtLeast?: "sensitive" | "destructive"; unlessAuthorization?: Array<"requested">;
       action?: "block" | "approve"; approvalDescription?: string; approvalTimeoutMs?: number }>;
@@ -84,7 +86,7 @@ export default {
       return gate(event, ctx);
     }, { priority: 100 });
     writeLog({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
-      ruleIds: (config.control?.rules ?? []).map((rule) => rule.id) });
+      preset: config.control?.preset ?? "none", ruleIds: gate.ruleIds });
 
     // The key can come from the environment so it stays out of openclaw.json.
     if (!config.endpoint || !apiKey) {
@@ -127,8 +129,16 @@ export default {
 
     // Authorization context is per session, not per run: a later turn can
     // confirm an earlier request, and the agent's own files outlive a run.
+    // Also the run's outcome for the report (scripts/report.mjs): whether it
+    // ended cleanly, how long it took, how many tool calls it made. The error
+    // is OpenClaw's own failure summary, cut short; messages are never logged.
     api.on("agent_end", (event: any, ctx: any) => {
-      supervisor.endRun(runKeyOf(event, ctx));
+      const runKey = runKeyOf(event, ctx);
+      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
+        success: event?.success === true, error: typeof event?.error === "string" ? event.error.slice(0, 200) : null,
+        durationMs: typeof event?.durationMs === "number" ? event.durationMs : null,
+        toolCalls: supervisor.toolCalls(runKey) });
+      supervisor.endRun(runKey);
     });
     api.on("session_end", (_event: any, ctx: any) => {
       if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);

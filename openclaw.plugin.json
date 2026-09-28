@@ -29,6 +29,10 @@
         "additionalProperties": false,
         "properties": {
           "mode": { "type": "string", "enum": ["observe", "enforce"], "default": "observe" },
+          "preset": {
+            "type": "string", "enum": ["none", "recommended", "strict"], "default": "none",
+            "description": "Named rule set prepended to rules. recommended: hold unrequested destructive calls for approval. strict: block unrequested destructive calls and hold unrequested outward-facing ones (push, publish, send). Both waive calls the user's own turn requested."
+          },
           "rules": {
             "type": "array",
             "items": {
@@ -43,8 +47,8 @@
                   "description": "Operator-written action, target and risk shown to the reviewer; do not put secrets here." },
                 "approvalTimeoutMs": { "type": "integer", "minimum": 1000, "maximum": 600000, "default": 120000 },
                 "id": { "type": "string", "minLength": 1 },
-                "agentId": { "type": "string", "minLength": 1 },
-                "toolName": { "type": "string", "minLength": 1 },
+                "agentId": { "type": "string", "minLength": 1, "description": "Agent id, or \"*\" for every agent." },
+                "toolName": { "type": "string", "minLength": 1, "description": "Tool name, or \"*\" for every tool the risk classifier can judge (requires riskAtLeast)." },
                 "paramsMatch": {
                   "type": "object",
                   "additionalProperties": { "type": "string" },

@@ -147,3 +147,49 @@ test("unlessAuthorization accepts only requested", () => {
     assert.throws(() => createToolGate({ rules: [{ ...approveRule, unlessAuthorization: bad }] }), /only list requested/);
   }
 });
+
+test("the recommended preset holds unrequested destructive calls from any agent, for approval", () => {
+  const logs = [];
+  const gate = createToolGate({ mode: "enforce", preset: "recommended", log: (e) => logs.push(e),
+    authorize: () => "unrequested" });
+  assert.deepEqual(gate.ruleIds, ["preset-destructive-approve"]);
+  const held = gate({ toolName: "exec", params: { command: "rm -rf build" } }, { agentId: "any-agent" });
+  assert.equal(held.requireApproval.severity, "warning");
+  assert.match(held.requireApproval.description, /didn't ask for/);
+  // Harmless and outward-facing calls run; so do tools the classifier can't judge.
+  assert.equal(gate({ toolName: "exec", params: { command: "ls" } }, { agentId: "any-agent" }), undefined);
+  assert.equal(gate({ toolName: "exec", params: { command: "git push" } }, { agentId: "any-agent" }), undefined);
+  assert.equal(gate({ toolName: "mystery_tool", params: {} }, { agentId: "any-agent" }), undefined);
+  assert.equal(logs[0].ruleId, "preset-destructive-approve");
+});
+
+test("presets waive destructive calls the user's own turn requested", () => {
+  const logs = [];
+  const gate = createToolGate({ mode: "enforce", preset: "strict", log: (e) => logs.push(e),
+    authorize: () => "requested" });
+  assert.equal(gate({ toolName: "exec", params: { command: "rm -rf build" } }, { agentId: "main" }), undefined);
+  assert.equal(logs[0].type, "tool_gate_waived");
+});
+
+test("the strict preset blocks unrequested destruction and holds unrequested outward actions", () => {
+  const gate = createToolGate({ mode: "enforce", preset: "strict", authorize: () => "unrequested" });
+  assert.equal(gate({ toolName: "exec", params: { command: "git reset --hard" } }, { agentId: "main" }).block, true);
+  assert.ok(gate({ toolName: "exec", params: { command: "git push origin main" } }, { agentId: "main" }).requireApproval);
+  assert.equal(gate({ toolName: "exec", params: { command: "npm test" } }, { agentId: "main" }), undefined);
+});
+
+test("operator rules extend a preset; bad presets, colliding ids and bare tool wildcards are rejected", () => {
+  const gate = createToolGate({ preset: "recommended", rules: [rule] });
+  assert.deepEqual(gate.ruleIds, ["preset-destructive-approve", "test-denial"]);
+  assert.deepEqual(createToolGate({ preset: "none" }).ruleIds, []);
+  assert.throws(() => createToolGate({ preset: "paranoid" }), /control.preset must be one of none, recommended, strict/);
+  assert.throws(() => createToolGate({ preset: "recommended", rules: [{ ...rule, id: "preset-destructive-approve" }] }),
+    /duplicate control rule id/);
+  assert.throws(() => createToolGate({ rules: [{ id: "all", agentId: "*", toolName: "*" }] }), /needs riskAtLeast/);
+});
+
+test("an agent wildcard in an operator rule covers every agent", () => {
+  const gate = createToolGate({ mode: "enforce", rules: [{ ...rule, agentId: "*" }] });
+  assert.equal(gate(event, { agentId: "main" }).block, true);
+  assert.equal(gate(event, {}).block, true);
+});

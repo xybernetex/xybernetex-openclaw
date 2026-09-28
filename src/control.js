@@ -2,7 +2,12 @@
 // learned, post-execution policy and never waits for a remote service.
 import { hashParams } from "./supervisor.js";
 import { classifyToolCall, meetsRiskThreshold, RISK_LEVELS } from "./risk.js";
+import { presetRules } from "./presets.js";
 import { randomUUID } from "node:crypto";
+
+// agentId and toolName may be "*" (any agent / any tool). A tool wildcard
+// needs riskAtLeast: without it, one rule would gate every call the agent makes.
+const ANY = "*";
 
 // "none" would match every call (paramsMatch: {} already does that), so it's
 // not a meaningful threshold to configure - only the two elevated tiers are.
@@ -17,11 +22,12 @@ const WAIVING_LABELS = Object.freeze(["requested"]);
 // logged on every gate event, and a rule's optional unlessAuthorization
 // (["requested"]) skips that rule for calls the user's own turn asked for.
 // Any failure to label counts as unlabeled - the rule applies.
-export function createToolGate({ mode = "observe", rules = [], log = () => {}, authorize = () => null } = {}) {
+// preset (src/presets.js) prepends a named rule set to the operator's rules.
+export function createToolGate({ mode = "observe", preset, rules = [], log = () => {}, authorize = () => null } = {}) {
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
   if (!Array.isArray(rules)) throw new Error("control.rules must be an array");
   const ids = new Set();
-  const compiled = rules.map((rule) => {
+  const compiled = [...presetRules(preset), ...rules].map((rule) => {
     if (!rule || ["id", "agentId", "toolName"].some((k) => typeof rule[k] !== "string" || !rule[k].trim())) {
       throw new Error("each control rule needs a nonempty id, agentId and toolName");
     }
@@ -45,6 +51,9 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {}, a
     if (rule.riskAtLeast !== undefined && !RISK_THRESHOLDS.includes(rule.riskAtLeast)) {
       throw new Error(`control rule riskAtLeast must be one of ${RISK_THRESHOLDS.join(", ")}`);
     }
+    if (rule.toolName === ANY && rule.riskAtLeast === undefined) {
+      throw new Error(`control rule '${rule.id}' uses toolName "*" and needs riskAtLeast`);
+    }
     const unless = rule.unlessAuthorization ?? [];
     if (!Array.isArray(unless) || unless.some((label) => !WAIVING_LABELS.includes(label))) {
       throw new Error(`control rule unlessAuthorization may only list ${WAIVING_LABELS.join(", ")}`);
@@ -52,11 +61,12 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {}, a
     return { ...rule, action, approvalTimeoutMs, paramsMatch: { ...match }, unlessAuthorization: [...unless] };
   });
 
-  return (event, ctx) => {
+  const gate = (event, ctx) => {
     // Classified once per event: risk.js judges from the tool name and
     // params, the same inputs every rule for this tool call shares.
     const riskTier = classifyToolCall(event?.toolName, event?.params);
-    const candidates = compiled.filter((r) => r.agentId === ctx?.agentId && r.toolName === event?.toolName &&
+    const candidates = compiled.filter((r) => (r.agentId === ANY || r.agentId === ctx?.agentId) &&
+      (r.toolName === ANY || r.toolName === event?.toolName) &&
       Object.entries(r.paramsMatch).every(([key, value]) =>
         Object.hasOwn(event.params ?? {}, key) && event.params[key] === value) &&
       (r.riskAtLeast === undefined || meetsRiskThreshold(riskTier, r.riskAtLeast)));
@@ -112,4 +122,6 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {}, a
         "Continue any permitted work and explain the restriction to the user.",
     };
   };
+  gate.ruleIds = compiled.map((r) => r.id);
+  return gate;
 }
