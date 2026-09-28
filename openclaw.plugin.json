@@ -20,6 +20,16 @@
           "minToolCalls": { "type": "integer", "minimum": 0, "default": 1 }
         }
       },
+      "interventions": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Follow-up turns after a run ends: \"retry\" when it died with unusable model output, \"verify\" (check your work) when it finished. observe logs the decision; act schedules the turn in the same session.",
+        "properties": {
+          "mode": { "type": "string", "enum": ["observe", "act"], "default": "observe" },
+          "agentIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Limit to these agents; omit for all." },
+          "verifyRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "Share of finished runs that get a verify turn." }
+        }
+      },
       "proposalTelemetry": {
         "type": "boolean", "default": false,
         "description": "Record hashed pending calls locally using the alpha v2 schema. No remote inference or learned enforcement."

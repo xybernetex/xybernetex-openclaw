@@ -11,6 +11,7 @@ import { createSupervisor } from "../src/supervisor.js";
 import { createToolGate } from "../src/control.js";
 import { createAuthorizationTracker } from "../src/authz.js";
 import { createFinalizeVerifier } from "../src/verify.js";
+import { createCliScheduler, createInterventions } from "../src/interventions.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -21,6 +22,7 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                    
                               
                                                                                            
+                                                                                         
              
                                  
                                                
@@ -59,6 +61,16 @@ export default {
     const gate = createToolGate({ ...config.control, log: writeLog,
       authorize: (event     , ctx     ) => authz.label(ctx?.sessionKey, event?.toolName, event?.params) });
 
+    // Follow-up turns (src/interventions.js): a detached `openclaw agent`
+    // turn in the same session, on the same model. Off unless configured.
+    let interventions                                                = null;
+    const runModels = new Map                (); // runKey -> provider/model, from llm_output
+    if (config.interventions) {
+      interventions = createInterventions({ config: config.interventions, log: writeLog, schedule: createCliScheduler() });
+      writeLog({ type: "interventions_ready", mode: config.interventions.mode ?? "observe",
+        agentIds: config.interventions.agentIds ?? null, verifyRate: config.interventions.verifyRate ?? 1 });
+    }
+
     // The user's own turn, before the model reads anything - the only text
     // src/authz.js accepts as authorization, so instructions planted in files
     // or tool results can't grant it. Always passes: this hook only observes
@@ -67,6 +79,8 @@ export default {
     try {
       api.on("before_agent_run", (event     , ctx     ) => {
         try {
+          // Our own follow-up turn is never the user's request.
+          if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) return { outcome: "pass" };
           const provenance = ctx?.inputProvenance?.kind ?? null;
           const accepted = authz.setRequest(ctx?.sessionKey, event?.prompt, provenance);
           writeLog({ type: "authz_request", sessionKey: ctx?.sessionKey, accepted, provenance,
@@ -114,7 +128,14 @@ export default {
     // too late to inform any decision in the run. Needs the conversation-
     // access grant; without it the line is simply never written.
     api.on("llm_output", (event     , ctx     ) => {
-      writeLog({ runKey: runKeyOf(event, ctx), runUsage: event?.usage ?? null, model: event?.model });
+      const runKey = runKeyOf(event, ctx);
+      writeLog({ runKey, runUsage: event?.usage ?? null, model: event?.model });
+      if (interventions && typeof event?.model === "string") {
+        const model = event.model.includes("/") && !event.model.startsWith("@") ? event.model
+          : event.provider ? `${event.provider}/${event.model}` : event.model;
+        runModels.set(runKey, model);
+        while (runModels.size > 500) runModels.delete(runModels.keys().next().value);
+      }
     });
 
     // Also needs the conversation-access grant; runs are LRU-evicted
@@ -135,11 +156,22 @@ export default {
     // is OpenClaw's own failure summary, cut short; messages are never logged.
     api.on("agent_end", (event     , ctx     ) => {
       const runKey = runKeyOf(event, ctx);
-      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
-        success: event?.success === true, error: typeof event?.error === "string" ? event.error.slice(0, 200) : null,
+      const summary = { success: event?.success === true,
+        error: typeof event?.error === "string" ? event.error.slice(0, 200) : null,
         durationMs: typeof event?.durationMs === "number" ? event.durationMs : null,
-        toolCalls: supervisor.toolCalls(runKey) });
+        toolCalls: supervisor.toolCalls(runKey) };
+      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary });
       supervisor.endRun(runKey);
+      // Never awaited: an intervention can't hold up the end of a run. The
+      // short wait lets OpenClaw report the run's model (llm_output lands
+      // just after agent_end), so a follow-up runs on the same model.
+      if (interventions) {
+        setTimeout(() => {
+          const model = runModels.get(runKey) ?? null;
+          runModels.delete(runKey);
+          void interventions.onRunEnd(runKey, ctx, { ...summary, model }).catch(() => {});
+        }, 400);
+      }
     });
     api.on("session_end", (_event     , ctx     ) => {
       if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);
