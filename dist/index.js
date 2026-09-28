@@ -1,0 +1,148 @@
+// Generated from index.ts by scripts/build.mjs - edit index.ts, then run npm run build.
+// No openclaw/plugin-sdk import on purpose: a plugin linked from outside
+// OpenClaw's own install can't always resolve that package (it failed on
+// 2026.3.22), and OpenClaw's loader accepts a plain { id, register } object
+// in every version from 2026.3.22 through 2026.9.6 anyway.
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+
+import { createSupervisor } from "../src/supervisor.js";
+import { createToolGate } from "../src/control.js";
+import { createAuthorizationTracker } from "../src/authz.js";
+import { createFinalizeVerifier } from "../src/verify.js";
+
+const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
+
+               
+                    
+                  
+                              
+                   
+                              
+                                                                                           
+             
+                                 
+                                               
+                                                                            
+                                                                                                        
+                                                                                          
+                                                                                                
+    
+  
+
+export default {
+  id: "xybernetex-openclaw",
+  name: "Xybernetex Supervisor for OpenClaw",
+  description: "Agent supervisor with observation and opt-in local tool restrictions.",
+  register(api     ) {
+    const config = (api.pluginConfig ?? {})          ;
+    const logPath = config.logPath ?? DEFAULT_LOG_PATH;
+    const writeLog = (entry                         ) => {
+      try {
+        mkdirSync(dirname(logPath), { recursive: true });
+        appendFileSync(logPath, JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n");
+      } catch {
+        // best-effort: logging must never break the agent
+      }
+    };
+
+    const apiKey = process.env.XYBERNETEX_API_KEY ?? config.apiKey;
+    const authz = createAuthorizationTracker();
+    const supervisor = createSupervisor({ endpoint: config.endpoint, apiKey, authz,
+      maxToolCallsPerRun: config.maxToolCallsPerRun, proposalTelemetry: config.proposalTelemetry, log: writeLog });
+    const runKeyOf = (event     , ctx     )         =>
+      event?.runId ?? ctx?.runId ?? ctx?.sessionKey ?? ctx?.sessionId ?? "unknown";
+
+    // Register the local gate even if remote observation is unavailable.
+    // No endpoint failure can disable configured restrictions.
+    const gate = createToolGate({ ...config.control, log: writeLog,
+      authorize: (event     , ctx     ) => authz.label(ctx?.sessionKey, event?.toolName, event?.params) });
+
+    // The user's own turn, before the model reads anything - the only text
+    // src/authz.js accepts as authorization, so instructions planted in files
+    // or tool results can't grant it. Always passes: this hook only observes
+    // here, and a gate hook's unsupported return shape fails closed. Needs
+    // hooks.allowConversationAccess; logs size and provenance, never the text.
+    try {
+      api.on("before_agent_run", (event     , ctx     ) => {
+        try {
+          const provenance = ctx?.inputProvenance?.kind ?? null;
+          const accepted = authz.setRequest(ctx?.sessionKey, event?.prompt, provenance);
+          writeLog({ type: "authz_request", sessionKey: ctx?.sessionKey, accepted, provenance,
+            chars: typeof event?.prompt === "string" ? event.prompt.length : null });
+        } catch { /* authorization context is best-effort */ }
+        return { outcome: "pass" };
+      });
+    } catch {
+      writeLog({ error: "before_agent_run unavailable on this OpenClaw version: authorization labels disabled" });
+    }
+    api.on("before_tool_call", (event     , ctx     ) => {
+      if (config.proposalTelemetry) {
+        try {
+          supervisor.recordProposal(runKeyOf(event, ctx), { toolName: event.toolName, params: event.params,
+            toolCallId: event.toolCallId ?? ctx?.toolCallId, sessionKey: ctx?.sessionKey });
+        } catch { /* telemetry failure must not bypass the gate */ }
+      }
+      return gate(event, ctx);
+    }, { priority: 100 });
+    writeLog({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
+      preset: config.control?.preset ?? "none", ruleIds: gate.ruleIds });
+
+    // The key can come from the environment so it stays out of openclaw.json.
+    if (!config.endpoint || !apiKey) {
+      writeLog({ error: "xybernetex-openclaw remote observation disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
+                        "(or plugin config `apiKey`) - see README" });
+    }
+
+    // One supervised trajectory = one agent run (a single user turn and all
+    // its tool calls). Falls back to the session when a run id is missing.
+    // Nothing is returned, and OpenClaw runs after_tool_call fire-and-forget,
+    // so the agent never waits on the supervisor.
+    api.on("after_tool_call", (event     , ctx     ) => {
+      void supervisor.recordToolCall(runKeyOf(event, ctx), {
+        toolName: event.toolName,
+        params: event.params,
+        error: event.error,
+        toolCallId: event.toolCallId ?? ctx?.toolCallId,
+        sessionKey: ctx?.sessionKey,
+      });
+    });
+
+    // The run's total token spend, which OpenClaw reports once, after the
+    // run. Logged on its own line (joinable on runKey) for later analysis -
+    // too late to inform any decision in the run. Needs the conversation-
+    // access grant; without it the line is simply never written.
+    api.on("llm_output", (event     , ctx     ) => {
+      writeLog({ runKey: runKeyOf(event, ctx), runUsage: event?.usage ?? null, model: event?.model });
+    });
+
+    // Also needs the conversation-access grant; runs are LRU-evicted
+    // regardless, so this only frees memory sooner.
+    // Opt-in: one verification pass before a run's final answer (src/verify.js).
+    // Invalid settings fail registration, like invalid control rules.
+    if (config.verifyBeforeFinish) {
+      const verify = createFinalizeVerifier({ ...config.verifyBeforeFinish, runKeyOf, log: writeLog,
+        toolCallsFor: (runKey        ) => supervisor.toolCalls(runKey) });
+      api.on("before_agent_finalize", (event     , ctx     ) => verify(event, ctx));
+      writeLog({ type: "verify_ready", agentIds: config.verifyBeforeFinish.agentIds });
+    }
+
+    // Authorization context is per session, not per run: a later turn can
+    // confirm an earlier request, and the agent's own files outlive a run.
+    // Also the run's outcome for the report (scripts/report.mjs): whether it
+    // ended cleanly, how long it took, how many tool calls it made. The error
+    // is OpenClaw's own failure summary, cut short; messages are never logged.
+    api.on("agent_end", (event     , ctx     ) => {
+      const runKey = runKeyOf(event, ctx);
+      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
+        success: event?.success === true, error: typeof event?.error === "string" ? event.error.slice(0, 200) : null,
+        durationMs: typeof event?.durationMs === "number" ? event.durationMs : null,
+        toolCalls: supervisor.toolCalls(runKey) });
+      supervisor.endRun(runKey);
+    });
+    api.on("session_end", (_event     , ctx     ) => {
+      if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);
+    });
+  },
+};

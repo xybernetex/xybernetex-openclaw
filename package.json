@@ -1,12 +1,39 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "description": "Xybernetex control plane for OpenClaw: authorization-aware safety gate, run telemetry and customer report.",
+  "license": "MIT",
   "type": "module",
+  "bin": {
+    "xybernetex-openclaw": "scripts/setup.mjs",
+    "xybernetex-setup": "scripts/setup.mjs",
+    "xybernetex-report": "scripts/report.mjs"
+  },
+  "files": [
+    "index.ts",
+    "dist/",
+    "openclaw.plugin.json",
+    "src/",
+    "scripts/setup.mjs",
+    "scripts/report.mjs",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "node --test test/*.test.js"
+    "build": "node scripts/build.mjs",
+    "prepack": "node scripts/build.mjs",
+    "test": "node --test test/*.test.js",
+    "report": "node scripts/report.mjs",
+    "setup": "node scripts/setup.mjs"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.22"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": { "optional": true }
   },
   "openclaw": {
     "extensions": ["./index.ts"],

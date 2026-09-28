@@ -1,0 +1,172 @@
+#!/usr/bin/env node
+// One-command install of Xybernetex into an existing OpenClaw.
+//
+//   npx xybernetex-openclaw                  (once published)
+//   npx --package ./xybernetex-openclaw-0.3.0.tgz xybernetex-setup
+//   node scripts/setup.mjs --mode enforce --preset strict
+//
+// Installs and enables the plugin, sets the gate preset and mode, the policy
+// endpoint and (asked for, hidden) the API key, keeps any existing plugin
+// allowlist intact, and can restart the gateway and confirm the plugin loaded.
+// --dry-run prints every command without running any.
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
+import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+
+import { DEFAULT_ENDPOINT, PLUGIN_ID, describeStep, planSetup } from "../src/setup_plan.js";
+
+const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const LOG = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
+
+const { values: args } = parseArgs({ options: {
+  mode: { type: "string", default: "observe" },
+  preset: { type: "string", default: "recommended" },
+  endpoint: { type: "string", default: DEFAULT_ENDPOINT },
+  source: { type: "string", default: PACKAGE_ROOT },
+  reinstall: { type: "boolean", default: false },
+  "no-key": { type: "boolean", default: false },
+  restart: { type: "boolean", default: false },
+  "dry-run": { type: "boolean", default: false },
+  yes: { type: "boolean", short: "y", default: false },
+  help: { type: "boolean", short: "h", default: false },
+} });
+
+if (args.help) {
+  console.log(`usage: xybernetex-setup [options]
+  --mode observe|enforce          gate mode (default observe: log what it would stop, stop nothing)
+  --preset recommended|strict|none  rule set (default recommended)
+  --endpoint URL                  policy endpoint (default ${DEFAULT_ENDPOINT})
+  --source PATH|SPEC              where to install the plugin from (default: this package)
+  --reinstall                     reinstall even if already installed
+  --no-key                        don't ask for an API key (local gate and report only)
+  --restart                       restart the gateway and confirm the plugin loaded
+  --yes, -y                       confirm installing from outside ClawHub without asking
+  --dry-run                       print the commands, run nothing`);
+  process.exit(0);
+}
+
+// The openclaw CLI: its entry script run with this node when it's an npm
+// install (avoids Windows .cmd shims), otherwise the binary on PATH.
+function findOpenClaw() {
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const name of ["openclaw.cmd", "openclaw"]) {
+      const shim = join(dir, name);
+      if (!existsSync(shim) || !statSync(shim).isFile()) continue;
+      const entry = join(dir, "node_modules", "openclaw", "openclaw.mjs");
+      if (existsSync(entry)) return [process.execPath, entry];
+      if (name === "openclaw") return [shim];
+    }
+  }
+  return null;
+}
+
+const oc = findOpenClaw();
+if (!oc) {
+  console.error("openclaw isn't on PATH. Install OpenClaw first: https://openclaw.ai");
+  process.exit(1);
+}
+const run = (argv, { quiet = false } = {}) => {
+  const p = spawnSync(oc[0], [...oc.slice(1), ...argv], { encoding: "utf8", windowsHide: true });
+  if (!quiet && p.status !== 0) process.stderr.write((p.stderr || p.stdout || "").slice(-1500));
+  return p;
+};
+const json = (text) => {
+  const start = text.search(/[[{]/);
+  try { return start < 0 ? null : JSON.parse(text.slice(start)); } catch { return null; }
+};
+
+function ask(question, { hidden = false } = {}) {
+  return new Promise((done) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
+    if (hidden) rl._writeToOutput = (s) => { if (s.includes(question)) rl.output.write(s); };
+    rl.question(question, (answer) => { rl.close(); if (hidden) process.stdout.write("\n"); done(answer.trim()); });
+  });
+}
+
+const version = run(["--version"], { quiet: true }).stdout.trim().split("\n").pop();
+console.log(`Xybernetex setup for ${version || "OpenClaw"}\n`);
+
+const listed = json(run(["plugins", "list", "--json"], { quiet: true }).stdout ?? "");
+const installed = Array.isArray(listed?.plugins) && listed.plugins.some((p) => p.id === PLUGIN_ID);
+const allowed = json(run(["config", "get", "plugins.allow", "--json"], { quiet: true }).stdout ?? "");
+const state = { installed, allow: Array.isArray(allowed) ? allowed : null };
+
+let apiKey = null;
+if (!args["no-key"] && !args["dry-run"]) {
+  if (process.env.XYBERNETEX_API_KEY) {
+    console.log("Using the API key in XYBERNETEX_API_KEY (it takes precedence at runtime; not written to config).\n");
+  } else {
+    apiKey = await ask("Xybernetex API key (from your welcome email; Enter to skip): ", { hidden: true });
+    if (!apiKey) console.log("No key: the safety gate and the report still work; policy decisions stay off.\n");
+  }
+}
+
+// OpenClaw's own consent step for plugins that don't come from ClawHub.
+let trustSource = args.yes;
+if ((!installed || args.reinstall) && !trustSource && !args["dry-run"]) {
+  console.log(`OpenClaw asks you to confirm plugins installed from outside ClawHub.\nSource: ${args.source}`);
+  trustSource = /^y(es)?$/i.test(await ask("Install Xybernetex from this source? [y/N] "));
+  if (!trustSource) {
+    console.log("Cancelled. Nothing was changed.");
+    process.exit(1);
+  }
+  console.log("");
+}
+
+let steps;
+try {
+  steps = planSetup(state, { source: args.source, mode: args.mode, preset: args.preset, endpoint: args.endpoint,
+    apiKey: apiKey || null, reinstall: args.reinstall, trustSource });
+} catch (err) {
+  console.error(err.message);
+  process.exit(2);
+}
+if (installed && !args.reinstall) console.log("The plugin is already installed; updating its settings.\n");
+
+for (const step of steps) {
+  process.stdout.write(`- ${step.label}\n    ${describeStep(step)}\n`);
+  if (args["dry-run"]) continue;
+  const p = run(step.args);
+  if (p.status !== 0) {
+    if (step.optional) {
+      console.log("    (skipped: this OpenClaw version doesn't support it; authorization labels will be off)");
+      continue;
+    }
+    console.error(`\nSetup stopped at "${step.label}". Nothing after it was changed.`);
+    process.exit(1);
+  }
+}
+if (args["dry-run"]) {
+  console.log("\nDry run: nothing was changed.");
+  process.exit(0);
+}
+
+if (!args.restart) {
+  console.log(`\nDone. Restart the gateway to load it:\n    openclaw gateway restart\n` +
+    `Then run an agent and check the log: ${LOG}`);
+  process.exit(0);
+}
+
+console.log("\nRestarting the gateway...");
+const before = existsSync(LOG) ? readFileSync(LOG, "utf8").length : 0;
+if (run(["gateway", "restart"]).status !== 0) {
+  console.error("Couldn't restart the gateway. Run `openclaw gateway restart` yourself.");
+  process.exit(1);
+}
+const deadline = Date.now() + 120_000;
+while (Date.now() < deadline) {
+  const tail = existsSync(LOG) ? readFileSync(LOG, "utf8").slice(before) : "";
+  const ready = tail.split("\n").filter(Boolean).map(json).find((e) => e?.type === "tool_gate_ready");
+  if (ready) {
+    console.log(`Loaded: gate ${ready.mode}, preset ${ready.preset ?? "none"}, rules ${(ready.ruleIds ?? []).join(", ") || "none"}.`);
+    console.log("Generate a report any time with: npx xybernetex-report");
+    process.exit(0);
+  }
+  await new Promise((r) => setTimeout(r, 2000));
+}
+console.error("The gateway restarted but the plugin hasn't reported in yet. Check `openclaw plugins list`.");
+process.exit(1);

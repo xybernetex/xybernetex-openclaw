@@ -1,6 +1,7 @@
 node_modules/
 .wrangler/
-dist/
+# dist/ is committed: packaged installs load dist/index.js (scripts/build.mjs).
+*.tgz
 *.log
 *.log.jsonl
 .env

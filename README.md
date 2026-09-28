@@ -279,33 +279,55 @@ run's token total on its own line (`runUsage`, joinable on `runKey`).
 
 ## Install
 
+One command, from the package you were sent (or `npx xybernetex-openclaw`
+once it's published):
+
 ```bash
-git clone https://github.com/xybernetex/xybernetex-openclaw.git
-cd xybernetex-openclaw
-openclaw plugins install --link .
-openclaw plugins enable xybernetex-openclaw --accept-capabilities
-openclaw config set plugins.allow '["xybernetex-openclaw"]'
-openclaw config set plugins.entries.xybernetex-openclaw.config.endpoint "https://<your-endpoint>/evaluate"
+npx --package ./xybernetex-openclaw-0.3.0.tgz xybernetex-setup --restart
 ```
 
-(`--accept-capabilities` is the plugin consent step newer OpenClaw
-releases require; drop it on versions that don't recognize it.)
+Setup installs and enables the plugin and asks you to confirm the source
+(OpenClaw's own check for plugins from outside ClawHub). It grants
+conversation access, which authorization labels need. It sets the gate to
+`observe` with the `recommended` preset and asks for your API key (hidden,
+Enter to skip). With `--restart` it restarts the gateway and confirms the
+plugin loaded. If you have a plugin allowlist (`plugins.allow`), setup adds
+this plugin to it and keeps every existing entry. Other flags:
+`--mode enforce`, `--preset strict|none`, `--no-key`, `--yes`, `--dry-run`
+(print every command, change nothing).
 
-Set the API key as an environment variable for the gateway process (it
-takes precedence over the `apiKey` config field and keeps the key out of
-`openclaw.json`):
+Start in `observe` for a few days. The gate logs what it *would* hold or
+block and stops nothing. Check the report, then switch:
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.control.mode enforce
+```
+
+**Presets.** `recommended` holds destructive calls the user didn't ask for
+(delete, reset, drop, overwrite) for approval, across every agent. `strict`
+blocks those outright and also holds outward-facing actions nobody asked for
+(push, publish, send). Both let the user's own requests run without a
+prompt. Your own `control.rules` are added after the preset. Rules accept
+`"*"` for `agentId` and `toolName`; a tool wildcard needs `riskAtLeast`.
+Unattended runs (cron, one-shot CLI) have nowhere to show an approval, so
+OpenClaw denies them automatically there.
+
+**Report.** `npx xybernetex-report` (or `npm run report` in a checkout) turns
+the last 7 days of the log into one HTML page. It covers what the gate held,
+blocked or waived, who asked for the risky calls that ran, runs that died or
+looped, tokens by model, and policy latency, followed by plain-language next
+steps. `--days 30`, `--out file.html`, `--json`. It contains labels and
+hashes only, so it's safe to share.
+
+**From source** (development): `openclaw plugins install --link .` in a
+checkout loads `index.ts` directly. Packaged installs load `dist/index.js`,
+which `npm run build` regenerates (and `npm pack` runs automatically).
+
+The API key can also come from the gateway's environment, where it takes
+precedence over the `apiKey` config field:
 
 ```bash
 export XYBERNETEX_API_KEY=<key>
-```
-
-Optional: grant conversation access so the plugin can log each run's token
-total and free per-run memory as soon as a run ends (`llm_output` /
-`agent_end`). This setting doesn't exist on older OpenClaw releases such as
-2026.3.22, which reject it:
-
-```bash
-openclaw config set plugins.entries.xybernetex-openclaw.hooks.allowConversationAccess true
 ```
 
 Then restart the gateway (`openclaw gateway restart`) and watch decisions
