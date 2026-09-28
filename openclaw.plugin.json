@@ -8,6 +8,18 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "verifyBeforeFinish": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["agentIds"],
+        "description": "Ask the listed agents for one verification pass before a run's final answer (before_agent_finalize). Only runs with at least minToolCalls tool calls are asked, at most once each. Needs hooks.allowConversationAccess.",
+        "properties": {
+          "agentIds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+          "instruction": { "type": "string", "minLength": 1, "maxLength": 1000,
+            "description": "Replaces the default check-your-work instruction." },
+          "minToolCalls": { "type": "integer", "minimum": 0, "default": 1 }
+        }
+      },
       "proposalTelemetry": {
         "type": "boolean", "default": false,
         "description": "Record hashed pending calls locally using the alpha v2 schema. No remote inference or learned enforcement."

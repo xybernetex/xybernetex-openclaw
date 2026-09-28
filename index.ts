@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { createSupervisor } from "./src/supervisor.js";
 import { createToolGate } from "./src/control.js";
 import { createAuthorizationTracker } from "./src/authz.js";
+import { createFinalizeVerifier } from "./src/verify.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -18,6 +19,7 @@ type Config = {
   maxToolCallsPerRun?: number;
   logPath?: string;
   proposalTelemetry?: boolean;
+  verifyBeforeFinish?: { agentIds: string[]; instruction?: string; minToolCalls?: number };
   control?: {
     mode?: "observe" | "enforce";
     rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string>;
@@ -114,6 +116,15 @@ export default {
 
     // Also needs the conversation-access grant; runs are LRU-evicted
     // regardless, so this only frees memory sooner.
+    // Opt-in: one verification pass before a run's final answer (src/verify.js).
+    // Invalid settings fail registration, like invalid control rules.
+    if (config.verifyBeforeFinish) {
+      const verify = createFinalizeVerifier({ ...config.verifyBeforeFinish, runKeyOf, log: writeLog,
+        toolCallsFor: (runKey: string) => supervisor.toolCalls(runKey) });
+      api.on("before_agent_finalize", (event: any, ctx: any) => verify(event, ctx));
+      writeLog({ type: "verify_ready", agentIds: config.verifyBeforeFinish.agentIds });
+    }
+
     // Authorization context is per session, not per run: a later turn can
     // confirm an earlier request, and the agent's own files outlive a run.
     api.on("agent_end", (event: any, ctx: any) => {

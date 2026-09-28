@@ -164,5 +164,8 @@ export function createSupervisor({
     return snapshot;
   }
 
-  return { recordToolCall, recordProposal, endRun, trackedRuns: () => runs.size };
+  // Completed tool calls so far in a run, without creating or touching its state.
+  const toolCalls = (runKey) => runs.get(runKey)?.toolCount ?? 0;
+
+  return { recordToolCall, recordProposal, endRun, toolCalls, trackedRuns: () => runs.size };
 }

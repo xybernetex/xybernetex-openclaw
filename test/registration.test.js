@@ -23,6 +23,29 @@ test("the actual plugin registers a working gate without a remote endpoint", () 
     assert.ok(logs.some((e) => e.type === "tool_gate_ready" && e.mode === "enforce"));
     assert.ok(logs.some((e) => e.type === "tool_gate" && e.enforced));
     assert.ok(!logs.some((e) => e.type === "tool_proposal"));
+    assert.equal(hooks.has("before_agent_finalize"), false); // verification is opt-in
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("verifyBeforeFinish registers a finalize hook that asks once, after the run did work", () => {
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-verify-"));
+  try {
+    const hooks = new Map();
+    plugin.register({
+      pluginConfig: { logPath: join(dir, "events.jsonl"), verifyBeforeFinish: { agentIds: ["scenarios"] } },
+      on: (name, handler) => hooks.set(name, handler),
+    });
+    const ctx = { runId: "r1", agentId: "scenarios", sessionKey: "s" };
+    const finalize = hooks.get("before_agent_finalize");
+    assert.equal(finalize({ runId: "r1" }, ctx), undefined); // no tool calls yet
+    hooks.get("after_tool_call")({ toolName: "write", params: { path: "x" } }, ctx);
+    assert.equal(finalize({ runId: "r1" }, ctx).action, "revise");
+    assert.equal(finalize({ runId: "r1" }, ctx), undefined);
+    const logs = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+    assert.ok(logs.some((e) => e.type === "verify_ready"));
+    assert.equal(logs.filter((e) => e.type === "finalize_verify").length, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
