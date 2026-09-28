@@ -10,7 +10,8 @@ import { createSupervisor } from "./src/supervisor.js";
 import { createToolGate } from "./src/control.js";
 import { createAuthorizationTracker } from "./src/authz.js";
 import { createFinalizeVerifier } from "./src/verify.js";
-import { createCliScheduler, createInterventions, createRemoteDecider, retriable } from "./src/interventions.js";
+import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunError, lastReplyError, retriable }
+  from "./src/interventions.js";
 import { createOutcomeSender, createOutcomeTracker } from "./src/outcomes.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
@@ -183,6 +184,18 @@ export default {
         error: typeof event?.error === "string" ? event.error.slice(0, 200) : null,
         durationMs: typeof event?.durationMs === "number" ? event.durationMs : null,
         toolCalls: supervisor.toolCalls(runKey) };
+      // OpenClaw's own report misses the commonest deaths: a "successful" run
+      // whose model said nothing (incomplete_turn), and an aborted run with no
+      // error given (the reason is on its final message). Needs the transcript,
+      // i.e. hooks.allowConversationAccess; without it the report stands.
+      try {
+        if (summary.success) {
+          const empty = emptyRunError(event?.messages);
+          if (empty) Object.assign(summary, { success: false, error: empty });
+        } else if (!summary.error) {
+          summary.error = lastReplyError(event?.messages);
+        }
+      } catch { /* transcript shape changed: leave it as reported */ }
       writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary });
       supervisor.endRun(runKey);
       outcomes?.noteRunEnd(runKey, summary.success);

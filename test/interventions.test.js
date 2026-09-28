@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EventEmitter } from "node:events";
-import { MARKER, MESSAGES, createCliScheduler, createInterventions, createRemoteDecider, decideV0, isOurs, retriable } from "../src/interventions.js";
+import { MARKER, MESSAGES, createCliScheduler, createInterventions, createRemoteDecider, decideV0, emptyRunError, isOurs,
+  lastReplyError, retriable } from "../src/interventions.js";
 import plugin from "../index.ts";
 
 const ctx = { sessionKey: "agent:main:s1", agentId: "main" };
@@ -139,6 +140,58 @@ test("the plugin wires it up: decisions are logged, and our turn is never the us
     assert.deepEqual(iv.map((e) => e.action), ["verify", "outcome"]);
     assert.equal(iv[0].model, "workers-ai/@cf/zai-org/glm-5.3-flash");
     assert.equal(iv[0].scheduled, false); // observe mode never starts a turn
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a 'successful' run whose model said nothing is recognized as dead", () => {
+  const user = { role: "user", content: "fix the parser" };
+  const empty = { role: "assistant", content: [], stopReason: "length" };
+  // Exactly what OpenClaw left for the incomplete_turn deaths on 2026-09-28.
+  assert.equal(emptyRunError([user, empty]), "empty response from the model (stopReason length)");
+  assert.ok(retriable(emptyRunError([user, empty])));
+  // Any text or tool call means the model did answer.
+  assert.equal(emptyRunError([user, { role: "assistant", content: [{ type: "text", text: "Done." }] }]), null);
+  assert.equal(emptyRunError([user, { role: "assistant", content: [{ type: "toolCall", id: "t1" }] }, { role: "toolResult", content: [] }, empty]), null);
+  assert.equal(emptyRunError([user, { role: "assistant", content: "plain string answer" }]), null);
+  // Only this run counts: an earlier turn's answer doesn't rescue an empty one.
+  assert.equal(emptyRunError([user, { role: "assistant", content: [{ type: "text", text: "hi" }] }, user, empty]),
+    "empty response from the model (stopReason length)");
+  // No transcript (no conversation access), no user turn in view, or nothing from the model: can't tell.
+  for (const m of [undefined, [], [empty], [user]]) assert.equal(emptyRunError(m), null);
+});
+
+test("an aborted run's reason comes from its final message: timeouts retry, a user's stop never does", () => {
+  const user = { role: "user", content: "migrate the db" };
+  const work = [{ role: "assistant", content: [{ type: "toolCall", id: "t" }] }, { role: "toolResult", content: [] }];
+  const timedOut = { role: "assistant", content: [{ type: "text", text: "" }], stopReason: "aborted", errorMessage: "request timed out" };
+  assert.equal(lastReplyError([user, ...work, timedOut]), "request timed out");
+  assert.ok(retriable(lastReplyError([user, ...work, timedOut])));
+  const stopped = { ...timedOut, errorMessage: "request aborted" };
+  assert.equal(retriable(lastReplyError([user, ...work, stopped])), false);
+  assert.equal(lastReplyError([user, ...work]), null);          // last is a tool result, then nothing from the model
+  assert.equal(lastReplyError([user, { role: "assistant", content: [] }]), null);
+  assert.equal(lastReplyError(undefined), null);
+});
+
+test("the plugin retries an incomplete_turn death that OpenClaw reported as success", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-empty-"));
+  try {
+    const hooks = new Map();
+    plugin.register({ pluginConfig: { logPath: join(dir, "events.jsonl"), interventions: { mode: "observe", policy: "v0" } },
+      on: (name, handler) => hooks.set(name, handler) });
+    const c = { sessionKey: "agent:scenarios:e1", agentId: "scenarios", inputProvenance: { kind: "external_user" } };
+    hooks.get("before_agent_run")({ runId: "r1", prompt: "write wrap.py" }, c);
+    hooks.get("agent_end")({ runId: "r1", success: true, durationMs: 9000,
+      messages: [{ role: "user", content: "write wrap.py" }, { role: "assistant", content: [], stopReason: "length" }] }, c);
+    await new Promise((r) => setTimeout(r, 600));
+    const logs = readFileSync(join(dir, "events.jsonl"), "utf8").trim().split("\n").map(JSON.parse);
+    const end = logs.find((e) => e.type === "run_end");
+    assert.equal(end.success, false);
+    assert.match(end.error, /empty response/);
+    const d = logs.find((e) => e.type === "intervention");
+    assert.deepEqual([d.action, d.rule], ["retry", "v0-retry-on-death"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

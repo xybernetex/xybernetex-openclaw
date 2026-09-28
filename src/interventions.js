@@ -45,6 +45,40 @@ export function retriable(error) {
   return RETRIABLE.test(e) && !NOT_RETRIABLE.test(e);
 }
 
+// The commonest death doesn't look like one. When the model returns nothing
+// usable (OpenClaw's incomplete_turn), agent_end still says success: true -
+// the run just has an empty final assistant message (stopReason "length" in
+// every case seen on 2026-09-28). So: if nothing the model said since the
+// last user message has any text or tool call, the run died. Returns the
+// error to use in its place, or null (including when there's no transcript,
+// i.e. no conversation-access grant).
+export function emptyRunError(messages) {
+  if (!Array.isArray(messages) || !messages.length) return null;
+  let start = messages.length;
+  while (start > 0 && messages[start - 1]?.role !== "user") start -= 1;
+  if (start === 0 && messages[0]?.role !== "user") return null; // no user turn in view: can't tell
+  const replies = messages.slice(start).filter((m) => m?.role === "assistant");
+  if (!replies.length) return null;
+  const said = (m) => (typeof m.content === "string" ? m.content.trim() !== ""
+    : Array.isArray(m.content) && m.content.some((c) => c?.type === "toolCall" || (c?.type === "text" && String(c.text ?? "").trim())));
+  if (replies.some(said)) return null;
+  return `empty response from the model (stopReason ${replies.at(-1)?.stopReason ?? "unknown"})`;
+}
+
+// The other half: a run OpenClaw ends as aborted comes with success: false
+// and no error at all, but its final assistant message says why - e.g.
+// errorMessage "request timed out" (a model call that timed out: worth a
+// retry) versus a user's stop ("aborted": never retried, see NOT_RETRIABLE).
+export function lastReplyError(messages) {
+  if (!Array.isArray(messages)) return null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m?.role === "user") return null;
+    if (m?.role === "assistant") return typeof m.errorMessage === "string" && m.errorMessage ? m.errorMessage.slice(0, 200) : null;
+  }
+  return null;
+}
+
 // v0: retry runs that died; verify finished runs that did real work. The
 // verify probability is configurable (explore < 1 keeps some finished runs
 // unverified so outcomes can be compared).

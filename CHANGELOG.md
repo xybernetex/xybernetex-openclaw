@@ -17,6 +17,12 @@
   `interventions.shareOutcomes` to `false` to keep them local.
 - Setup: `--interventions off|observe|act`, `--intervention-agents`,
   `--no-share-outcomes`.
+- Dead runs are recognized. OpenClaw reports its commonest death - the model
+  returning nothing usable - as a successful run, and an aborted run without
+  a reason. The plugin now reads the run's final messages: an empty answer, or
+  a model call that timed out, counts as a death and can be retried; a user's
+  stop never is. Checked against 155 real runs: every such death caught, no
+  finished run misread.
 
 ## 0.3.2
 
