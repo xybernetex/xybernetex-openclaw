@@ -148,7 +148,15 @@ export function createSupervisor({
       catch { /* best-effort telemetry */ }
     }
     const atCall = { step: run.toolCount, toolTail: [...run.toolTail], toolName, sessionKey };
-    if (!endpoint || !apiKey) return Promise.resolve();
+    if (!endpoint || !apiKey) {
+      // Local-only install: no policy entry will carry this call, so record
+      // it on its own line for the report (the same hashed record).
+      if (!proposalTelemetry) {
+        try { log({ type: "tool_completed", runKey, sessionKey, toolCallId, step: run.toolCount, record }); }
+        catch { /* best-effort telemetry */ }
+      }
+      return Promise.resolve();
+    }
     run.queue = run.queue.then(() => evaluate(run, runKey, atCall));
     return run.queue;
   }
