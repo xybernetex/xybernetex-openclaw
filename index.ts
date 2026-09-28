@@ -21,7 +21,7 @@ type Config = {
   control?: {
     mode?: "observe" | "enforce";
     rules?: Array<{ id: string; agentId: string; toolName: string; paramsMatch?: Record<string, string>;
-      riskAtLeast?: "sensitive" | "destructive";
+      riskAtLeast?: "sensitive" | "destructive"; unlessAuthorization?: Array<"requested">;
       action?: "block" | "approve"; approvalDescription?: string; approvalTimeoutMs?: number }>;
   };
 };

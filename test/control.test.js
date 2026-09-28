@@ -102,3 +102,48 @@ test("the matched risk tier is logged, and only when riskAtLeast actually decide
   paramsOnlyGate(event, ctx);
   assert.equal(logs[1].riskTier, null);
 });
+
+// unlessAuthorization: a rule the user's own request waives.
+const approveRule = { ...riskyRule, id: "approve-destructive", action: "approve",
+  approvalDescription: "A destructive command is pending.", unlessAuthorization: ["requested"] };
+const labelled = (label) => () => label;
+const rmTmp = { toolName: "exec", params: { command: "rm -rf tmp" } };
+
+test("a requested call skips a rule with unlessAuthorization, and the waiver is logged", () => {
+  const logs = [];
+  const gate = createToolGate({ mode: "enforce", rules: [approveRule], log: (e) => logs.push(e),
+    authorize: labelled("requested") });
+  assert.equal(gate(rmTmp, ctx), undefined);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].type, "tool_gate_waived");
+  assert.deepEqual(logs[0].ruleIds, ["approve-destructive"]);
+  assert.equal(logs[0].authorization, "requested");
+  assert.equal(logs[0].riskTier, "destructive");
+  assert.ok(!JSON.stringify(logs).includes("rm -rf"));
+});
+
+test("own_artifact, unrequested, unlabeled and a throwing labeler never waive", () => {
+  for (const authorize of [labelled("own_artifact"), labelled("unrequested"), labelled(null),
+    () => { throw new Error("labeler broke"); }]) {
+    const gate = createToolGate({ mode: "enforce", rules: [approveRule], authorize });
+    assert.ok(gate(rmTmp, ctx)?.requireApproval, String(authorize));
+  }
+});
+
+test("a waiver on one rule never lifts an overlapping rule without one", () => {
+  const block = { ...riskyRule, id: "hard-block" };
+  const gate = createToolGate({ mode: "enforce", rules: [approveRule, block], authorize: labelled("requested") });
+  assert.equal(gate(rmTmp, ctx).block, true);
+});
+
+test("without unlessAuthorization a requested call is still gated", () => {
+  const { unlessAuthorization, ...plain } = approveRule;
+  const gate = createToolGate({ mode: "enforce", rules: [plain], authorize: labelled("requested") });
+  assert.ok(gate(rmTmp, ctx).requireApproval);
+});
+
+test("unlessAuthorization accepts only requested", () => {
+  for (const bad of [["own_artifact"], ["unrequested"], ["requested", "own_artifact"], "requested", [null]]) {
+    assert.throws(() => createToolGate({ rules: [{ ...approveRule, unlessAuthorization: bad }] }), /only list requested/);
+  }
+});

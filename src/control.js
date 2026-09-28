@@ -8,8 +8,15 @@ import { randomUUID } from "node:crypto";
 // not a meaningful threshold to configure - only the two elevated tiers are.
 const RISK_THRESHOLDS = RISK_LEVELS.filter((level) => level !== "none");
 
+// Labels that may waive a rule. Deliberately just "requested": own_artifact
+// can be staged within a session (create, then delete), so it must never
+// relax enforcement, and unrequested/unassessed obviously can't.
+const WAIVING_LABELS = Object.freeze(["requested"]);
+
 // authorize(event, ctx) supplies src/authz.js's label for the call. It is
-// logged alongside riskTier only - no rule condition uses it yet.
+// logged on every gate event, and a rule's optional unlessAuthorization
+// (["requested"]) skips that rule for calls the user's own turn asked for.
+// Any failure to label counts as unlabeled - the rule applies.
 export function createToolGate({ mode = "observe", rules = [], log = () => {}, authorize = () => null } = {}) {
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
   if (!Array.isArray(rules)) throw new Error("control.rules must be an array");
@@ -38,29 +45,46 @@ export function createToolGate({ mode = "observe", rules = [], log = () => {}, a
     if (rule.riskAtLeast !== undefined && !RISK_THRESHOLDS.includes(rule.riskAtLeast)) {
       throw new Error(`control rule riskAtLeast must be one of ${RISK_THRESHOLDS.join(", ")}`);
     }
-    return { ...rule, action, approvalTimeoutMs, paramsMatch: { ...match } };
+    const unless = rule.unlessAuthorization ?? [];
+    if (!Array.isArray(unless) || unless.some((label) => !WAIVING_LABELS.includes(label))) {
+      throw new Error(`control rule unlessAuthorization may only list ${WAIVING_LABELS.join(", ")}`);
+    }
+    return { ...rule, action, approvalTimeoutMs, paramsMatch: { ...match }, unlessAuthorization: [...unless] };
   });
 
   return (event, ctx) => {
     // Classified once per event: risk.js judges from the tool name and
     // params, the same inputs every rule for this tool call shares.
     const riskTier = classifyToolCall(event?.toolName, event?.params);
-    const matches = compiled.filter((r) => r.agentId === ctx?.agentId && r.toolName === event?.toolName &&
+    const candidates = compiled.filter((r) => r.agentId === ctx?.agentId && r.toolName === event?.toolName &&
       Object.entries(r.paramsMatch).every(([key, value]) =>
         Object.hasOwn(event.params ?? {}, key) && event.params[key] === value) &&
       (r.riskAtLeast === undefined || meetsRiskThreshold(riskTier, r.riskAtLeast)));
-    // A broad approval must never override an overlapping explicit prohibition.
-    const rule = matches.find((r) => r.action === "block") ?? matches[0];
-    if (!rule) return;
-    const enforced = mode === "enforce";
-    const metadata = { gateId: randomUUID(), mode, ruleId: rule.id, enforced,
+    if (!candidates.length) return;
+    let authorization = null;
+    try { authorization = authorize(event, ctx) ?? null; } catch { /* unlabeled: no waiver */ }
+    const matches = candidates.filter((r) => !r.unlessAuthorization.includes(authorization));
+    const base = { mode, enforced: mode === "enforce",
       runKey: event.runId ?? ctx?.runId ?? ctx?.sessionKey ?? "unknown",
       sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
       toolCallId: event.toolCallId ?? ctx?.toolCallId, toolName: event.toolName, paramsHash: hashParams(event.params),
+      authorization };
+    // A broad approval must never override an overlapping explicit prohibition.
+    const rule = matches.find((r) => r.action === "block") ?? matches[0];
+    if (!rule) {
+      // Every matching rule waived this call because the user asked for it.
+      // Logged so what ran unprompted can always be reviewed.
+      try {
+        log({ ...base, type: "tool_gate_waived", gateId: randomUUID(), riskTier,
+          ruleIds: candidates.map((r) => r.id) });
+      } catch { /* the call is permitted either way */ }
+      return;
+    }
+    const enforced = mode === "enforce";
+    const metadata = { ...base, gateId: randomUUID(), ruleId: rule.id,
       // riskTier is null whenever the rule matched purely on paramsMatch
       // (no riskAtLeast), since then risk.js's opinion wasn't consulted.
-      riskTier: rule.riskAtLeast !== undefined ? riskTier : null,
-      authorization: (() => { try { return authorize(event, ctx) ?? null; } catch { return null; } })() };
+      riskTier: rule.riskAtLeast !== undefined ? riskTier : null };
     const safeLog = (entry) => { try { log({ ...metadata, ...entry }); } catch { /* keep the gate */ } };
     // Log metadata and hashes, never raw command text or tool parameters.
     // Logging failure must not turn an explicit denial into an allowed call.
