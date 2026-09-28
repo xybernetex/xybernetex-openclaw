@@ -36,7 +36,8 @@ const { values: args } = parseArgs({ options: {
 } });
 
 if (args.help) {
-  console.log(`usage: xybernetex-setup [options]
+  console.log(`usage: npx xybernetex-openclaw [options]        (install)
+       npx xybernetex-openclaw report [--days 7]   (weekly report)
   --mode observe|enforce          gate mode (default observe: log what it would stop, stop nothing)
   --preset recommended|strict|none  rule set (default recommended)
   --endpoint URL                  policy endpoint (default ${DEFAULT_ENDPOINT})
@@ -163,7 +164,7 @@ while (Date.now() < deadline) {
   const ready = tail.split("\n").filter(Boolean).map(json).find((e) => e?.type === "tool_gate_ready");
   if (ready) {
     console.log(`Loaded: gate ${ready.mode}, preset ${ready.preset ?? "none"}, rules ${(ready.ruleIds ?? []).join(", ") || "none"}.`);
-    console.log("Generate a report any time with: npx xybernetex-report");
+    console.log("Generate a report any time with: npx xybernetex-openclaw report");
     process.exit(0);
   }
   await new Promise((r) => setTimeout(r, 2000));

@@ -42,7 +42,7 @@ nothing. When the report looks right, switch to enforce:
 openclaw config set plugins.entries.xybernetex-openclaw.config.control.mode enforce
 ```
 
-**Reports.** `npx xybernetex-report` turns the last 7 days into one HTML page.
+**Reports.** `npx xybernetex-openclaw report` turns the last 7 days into one HTML page.
 It covers what the gate held, blocked or waived, who asked for the risky calls
 that ran, runs that died or looped, tokens by model, and plain-language next
 steps.
@@ -66,6 +66,7 @@ npx xybernetex-openclaw --restart                  # recommended preset, observe
 npx xybernetex-openclaw --mode enforce --preset strict
 npx xybernetex-openclaw --no-key                   # local gate and report only
 npx xybernetex-openclaw --dry-run                  # print every command, change nothing
+npx xybernetex-openclaw report --days 30          # the report, for the last 30 days
 ```
 
 Setup does the following:

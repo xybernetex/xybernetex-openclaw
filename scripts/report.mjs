@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Builds the customer report from the plugin's local log.
 //
-//   node scripts/report.mjs                  last 7 days -> xybernetex-report.html
+//   npx xybernetex-openclaw report           last 7 days -> xybernetex-report.html
+//   node scripts/report.mjs                  (the same, from a checkout)
 //   node scripts/report.mjs --days 30 --out march.html
 //   node scripts/report.mjs --log D:\logs\xyb.jsonl --json
 import { createReadStream, writeFileSync } from "node:fs";

@@ -1,22 +1,29 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Xybernetex control plane for OpenClaw: authorization-aware safety gate, run telemetry and customer report.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",
   "homepage": "https://xybernetex.com",
-  "keywords": ["openclaw", "openclaw-plugin", "ai-agents", "agent-safety", "prompt-injection", "control-plane", "xybernetex"],
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "ai-agents",
+    "agent-safety",
+    "prompt-injection",
+    "control-plane",
+    "xybernetex"
+  ],
   "type": "module",
   "bin": {
-    "xybernetex-openclaw": "scripts/setup.mjs",
-    "xybernetex-setup": "scripts/setup.mjs",
-    "xybernetex-report": "scripts/report.mjs"
+    "xybernetex-openclaw": "scripts/cli.mjs"
   },
   "files": [
     "index.ts",
     "dist/",
     "openclaw.plugin.json",
     "src/",
+    "scripts/cli.mjs",
     "scripts/setup.mjs",
     "scripts/report.mjs",
     "README.md",
@@ -36,10 +43,14 @@
     "openclaw": ">=2026.3.22"
   },
   "peerDependenciesMeta": {
-    "openclaw": { "optional": true }
+    "openclaw": {
+      "optional": true
+    }
   },
   "openclaw": {
-    "extensions": ["./index.ts"],
+    "extensions": [
+      "./index.ts"
+    ],
     "compat": {
       "pluginApi": ">=2026.3.22",
       "minGatewayVersion": "2026.3.22"

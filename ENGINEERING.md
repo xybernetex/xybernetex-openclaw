@@ -312,7 +312,7 @@ prompt. Your own `control.rules` are added after the preset. Rules accept
 Unattended runs (cron, one-shot CLI) have nowhere to show an approval, so
 OpenClaw denies them automatically there.
 
-**Report.** `npx xybernetex-report` (or `npm run report` in a checkout) turns
+**Report.** `npx xybernetex-openclaw report` (or `npm run report` in a checkout) turns
 the last 7 days of the log into one HTML page. It covers what the gate held,
 blocked or waived, who asked for the risky calls that ran, runs that died or
 looped, tokens by model, and policy latency, followed by plain-language next
