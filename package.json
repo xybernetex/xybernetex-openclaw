@@ -3,6 +3,9 @@
   "version": "0.3.0",
   "description": "Xybernetex control plane for OpenClaw: authorization-aware safety gate, run telemetry and customer report.",
   "license": "MIT",
+  "author": "Xybernetex Systems LLC <chris@xybernetex.com>",
+  "homepage": "https://xybernetex.com",
+  "keywords": ["openclaw", "openclaw-plugin", "ai-agents", "agent-safety", "prompt-injection", "control-plane", "xybernetex"],
   "type": "module",
   "bin": {
     "xybernetex-openclaw": "scripts/setup.mjs",
