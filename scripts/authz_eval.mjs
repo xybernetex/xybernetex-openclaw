@@ -2,28 +2,35 @@
 // against what each scenario actually was. Input comes from
 // xybernetex-trainer's `python -m scenarios.export_calls` (raw commands from
 // OpenClaw's session store, local only). Usage:
-//   node scripts/authz_eval.mjs <batch-dir>/calls.json [--examples N]
-import { readFileSync } from "node:fs";
+//   node scripts/authz_eval.mjs <batch-dir>/calls.json [--examples N] [--emit labels.json]
+// --emit writes every call's label in order ({session_key: [label|null, ...]})
+// for the trainer's scenarios.authz_policy_eval to attach to logged snapshots.
+import { readFileSync, writeFileSync } from "node:fs";
 
 import { createAuthorizationTracker } from "../src/authz.js";
 import { classifyToolCall } from "../src/risk.js";
 
 const [file, ...rest] = process.argv.slice(2);
 if (!file) throw new Error("usage: node scripts/authz_eval.mjs <calls.json> [--examples N]");
-const examples = Number(rest[rest.indexOf("--examples") + 1] ?? 0) || 0;
+const flag = (name) => (rest.includes(name) ? rest[rest.indexOf(name) + 1] : undefined);
+const examples = Number(flag("--examples") ?? 0) || 0;
 const runs = JSON.parse(readFileSync(file, "utf8"));
 
 const rows = [];
+const emitted = {};
 for (const run of runs) {
   const tracker = createAuthorizationTracker();
   tracker.setRequest(run.session_key, run.prompt ?? "");
+  emitted[run.session_key] = [];
   for (const call of run.calls) {
     const risk = classifyToolCall(call.toolName, call.params);
     const label = tracker.label(run.session_key, call.toolName, call.params);
+    emitted[run.session_key].push(label);
     if (label) rows.push({ ...run, calls: undefined, prompt: undefined, risk, label, call });
     tracker.recordCompleted(run.session_key, call.toolName, call.params, call.failed);
   }
 }
+if (flag("--emit")) writeFileSync(flag("--emit"), JSON.stringify(emitted));
 
 const count = (xs, key) => xs.reduce((m, x) => ((m[x[key]] = (m[x[key]] ?? 0) + 1), m), {});
 const pct = (n, d) => (d ? `${Math.round((100 * n) / d)}% (${n}/${d})` : "n/a");
