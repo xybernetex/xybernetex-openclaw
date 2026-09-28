@@ -106,6 +106,14 @@ ${table(["Measure", "Value"], [
     ["Failed tool calls", `${num(s.calls.failed)} (${pct(s.calls.failed, s.calls.total)})`], ["Timed-out tool calls", num(s.calls.timedOut)]])}
 ${table(["Why runs died", "Runs"], Object.entries(s.runs.errorKinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, num(n)]))}
 </div>
+${s.interventions && (s.interventions.decided.retry + s.interventions.decided.verify + s.interventions.decided.none) ? `<h2>Interventions</h2>
+${table(["Follow-up", "Decided", "Started", "Finished cleanly"], [
+    ["Retry a run that died", num(s.interventions.decided.retry), num(s.interventions.started.retry),
+      s.interventions.outcomes.retry.n ? `${num(s.interventions.outcomes.retry.ok)} of ${num(s.interventions.outcomes.retry.n)}` : "–"],
+    ["Check your work", num(s.interventions.decided.verify), num(s.interventions.started.verify),
+      s.interventions.outcomes.verify.n ? `${num(s.interventions.outcomes.verify.ok)} of ${num(s.interventions.outcomes.verify.n)}` : "–"],
+    ["No follow-up", num(s.interventions.decided.none), "–", "–"]])}` : ""}
+
 <h2>Agents</h2>
 ${table(["Agent", "Runs", "Died"], Object.entries(s.runs.byAgent).sort((a, b) => b[1].runs - a[1].runs)
     .map(([a, v]) => [a, num(v.runs), `${num(v.died)} (${pct(v.died, v.runs)})`]))}

@@ -98,3 +98,23 @@ test("the HTML report escapes everything taken from the log", () => {
   assert.ok(html.includes("Acme &lt;weekly&gt;"));
   assert.match(html, /Risky calls stopped/);
 });
+
+test("interventions: decided vs started, follow-up outcomes, and the observe-mode nudge", () => {
+  const S = "agent:main:s1";
+  const log = [
+    { ts: T(1), type: "intervention", sessionKey: S, mode: "act", action: "verify", scheduled: true },
+    { ts: T(2), type: "intervention", sessionKey: S, mode: "act", action: "outcome", success: true, wasOurs: true },
+    { ts: T(3), type: "intervention", sessionKey: "agent:main:s2", mode: "act", action: "retry", scheduled: true, fallbackReason: "offline" },
+    { ts: T(4), type: "intervention", sessionKey: "agent:main:s2", mode: "act", action: "outcome", success: false, wasOurs: true },
+    { ts: T(5), type: "intervention", sessionKey: "agent:main:s3", mode: "act", action: "none", scheduled: false },
+  ];
+  const s = summarize(log, { from: Date.parse(T(0)), to: Date.parse(T(59)) });
+  assert.deepEqual(s.interventions.decided, { retry: 1, verify: 1, none: 1 });
+  assert.deepEqual(s.interventions.started, { retry: 1, verify: 1 });
+  assert.deepEqual(s.interventions.outcomes, { retry: { n: 1, ok: 0 }, verify: { n: 1, ok: 1 } });
+  assert.match(recommendations(s).join("\n"), /1 intervention decision\(s\) fell back/);
+  assert.match(renderReport(s), /Check your work<\/td><td>1<\/td><td>1<\/td><td>1 of 1/);
+
+  const observing = summarize([{ ts: T(1), type: "intervention", sessionKey: S, mode: "observe", action: "verify", scheduled: false }]);
+  assert.match(recommendations(observing).join("\n"), /1 run\(s\) would have gotten a follow-up/);
+});

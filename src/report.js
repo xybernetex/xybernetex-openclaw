@@ -148,6 +148,31 @@ export function summarize(entries, { from = null, to = null } = {}) {
     if (r.end && !r.end.success) byAgent[a].died += 1;
   }
 
+  // Interventions (src/interventions.js): what was decided, what actually
+  // ran, and how our follow-up turns ended. A follow-up's outcome is the next
+  // "outcome" line in the same session after the decision that started it.
+  const iv = { decided: { retry: 0, verify: 0, none: 0 }, started: { retry: 0, verify: 0 },
+    outcomes: { retry: { n: 0, ok: 0 }, verify: { n: 0, ok: 0 } }, fallbacks: 0, modes: {} };
+  const pending = new Map(); // sessionKey -> action awaiting its outcome
+  for (const e of rows.filter((x) => x.type === "intervention").sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))) {
+    if (e.action === "outcome") {
+      const action = pending.get(e.sessionKey);
+      if (action) {
+        iv.outcomes[action].n += 1;
+        if (e.success) iv.outcomes[action].ok += 1;
+        pending.delete(e.sessionKey);
+      }
+      continue;
+    }
+    if (e.action in iv.decided) iv.decided[e.action] += 1;
+    if (e.mode) iv.modes[e.mode] = (iv.modes[e.mode] ?? 0) + 1;
+    if (e.fallbackReason) iv.fallbacks += 1;
+    if (e.scheduled && e.action in iv.started) {
+      iv.started[e.action] += 1;
+      pending.set(e.sessionKey, e.action);
+    }
+  }
+
   const times = rows.map((e) => Date.parse(e.ts)).filter(Number.isFinite);
   const lat = [...policy.latencies].sort((a, b) => a - b);
   return {
@@ -161,6 +186,7 @@ export function summarize(entries, { from = null, to = null } = {}) {
       perRun: withTokens.length ? Math.round(tokensTotal / withTokens.length) : null, onDiedRuns: tokensOnDied, byModel },
     policy: { decisions: policy.decisions, errors: policy.errors, actions: policy.actions,
       p50Ms: percentile(lat, 0.5), p95Ms: percentile(lat, 0.95) },
+    interventions: iv,
   };
 }
 
@@ -191,6 +217,16 @@ export function recommendations(s) {
   }
   if (s.policy.decisions + s.policy.errors > 0 && s.policy.errors / (s.policy.decisions + s.policy.errors) > 0.02) {
     out.push(`${s.policy.errors} policy request(s) failed. Agents kept working (the plugin fails open), but check the endpoint and key.`);
+  }
+  const iv = s.interventions;
+  const wouldHelp = iv ? iv.decided.retry + iv.decided.verify - iv.started.retry - iv.started.verify : 0;
+  if (iv && (iv.modes.observe ?? 0) > 0 && wouldHelp > 0) {
+    out.push(`${wouldHelp} run(s) would have gotten a follow-up (a retry or a check-your-work turn) but interventions are in ` +
+      "observe mode. In Xybernetex testing a check-your-work turn lifted task completion by about 11 points; " +
+      "set interventions.mode to \"act\" to turn them on.");
+  }
+  if (iv?.fallbacks > 0) {
+    out.push(`${iv.fallbacks} intervention decision(s) fell back to the local rule because the policy service didn't answer.`);
   }
   if (!out.length) out.push("Nothing needs attention this period.");
   return out;
