@@ -118,3 +118,27 @@ test("interventions: decided vs started, follow-up outcomes, and the observe-mod
   const observing = summarize([{ ts: T(1), type: "intervention", sessionKey: S, mode: "observe", action: "verify", scheduled: false }]);
   assert.match(recommendations(observing).join("\n"), /1 run\(s\) would have gotten a follow-up/);
 });
+
+test("outcomes: what the user said next, by what was applied, and what verify and retry turns did", () => {
+  const ep = (min, applied, user, extra = {}) => ({ ts: T(min), type: "episode", applied, user, ...extra });
+  const log = [
+    ...[1, 2, 3, 4, 5].map((m) => ep(m, "verify", "thanks", { verify: "fixed", followup: { success: true } })),
+    ...[6, 7, 8, 9, 10].map((m) => ep(m, "verify", "none", { verify: "confirmed", followup: { success: true } })),
+    ep(11, "retry", "new", { followup: { success: true } }),
+    ep(12, "retry", "none", { followup: { success: false } }),
+    ...Array.from({ length: 12 }, (_, i) => ep(20 + i, "none", i < 4 ? "correction" : i < 5 ? "repeat" : "new")),
+    ep(40, "none", "session_end"),
+  ];
+  const s = summarize(log, { from: Date.parse(T(0)), to: Date.parse(T(59)) });
+  assert.equal(s.outcomes.episodes, 25);
+  assert.deepEqual(s.outcomes.verify, { fixed: 5, confirmed: 5, failed: 0 });
+  assert.deepEqual(s.outcomes.retry, { n: 2, finished: 1 });
+  assert.deepEqual(s.outcomes.byApplied.none, { n: 13, replied: 12, correction: 4, repeat: 1, thanks: 0, new: 7 });
+  const recs = recommendations(s).join("\n");
+  assert.match(recs, /changed files in 5 of 10 runs \(50%\)/);
+  assert.match(recs, /After 5 of 12 runs without a follow-up/);
+  const html = renderReport(s);
+  assert.match(html, /What happened next/);
+  assert.match(html, /No follow-up<\/td><td>13<\/td><td>12<\/td><td>5 \(42%\)/);
+  assert.match(html, /Finished on the retry<\/td><td>1</);
+});

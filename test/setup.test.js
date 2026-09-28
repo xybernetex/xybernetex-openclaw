@@ -13,11 +13,26 @@ test("a fresh install: install, enable, conversation access, endpoint, mode, pre
     "config set plugins.entries.xybernetex-openclaw.config.endpoint",
     "config set plugins.entries.xybernetex-openclaw.config.control.mode",
     "config set plugins.entries.xybernetex-openclaw.config.control.preset",
+    "config set plugins.entries.xybernetex-openclaw.config.interventions",
     "config set plugins.entries.xybernetex-openclaw.config.apiKey"]);
   assert.equal(steps[3].args[3], DEFAULT_ENDPOINT);
   assert.equal(steps[4].args[3], "observe"); // safe default: log what it would stop
   assert.equal(steps[5].args[3], "recommended");
+  assert.deepEqual(JSON.parse(steps[6].args[3]), { mode: "observe" }); // decide and log, start nothing
   assert.equal(steps[2].optional, true);
+});
+
+test("interventions: act for chosen agents, outcomes kept local, or off", () => {
+  const find = (steps) => steps.find((s) => s.args[2].endsWith(".config.interventions"));
+  const act = find(planSetup({ installed: true, allow: null },
+    { interventions: "act", interventionAgents: ["ci-bot", "nightly"], shareOutcomes: false }));
+  assert.deepEqual(JSON.parse(act.args[3]), { mode: "act", agentIds: ["ci-bot", "nightly"], shareOutcomes: false });
+  assert.match(act.label, /act for ci-bot, nightly, outcomes kept local/);
+  const off = find(planSetup({ installed: true, allow: null }, { interventions: "off" }));
+  assert.deepEqual(off.args, ["config", "unset", "plugins.entries.xybernetex-openclaw.config.interventions"]);
+  assert.equal(off.optional, true); // nothing to unset on a fresh install
+  assert.throws(() => planSetup({ installed: true, allow: null }, { interventions: "always" }), /--interventions/);
+  assert.throws(() => planSetup({ installed: true, allow: null }, { interventionAgents: ["a b"] }), /agent ids/);
 });
 
 test("an existing allowlist is extended, never replaced; none means nothing to add", () => {

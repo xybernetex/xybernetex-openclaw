@@ -7,7 +7,8 @@ export const DEFAULT_ENDPOINT = "https://api.xybernetex.com/evaluate";
 const ENTRY = `plugins.entries.${PLUGIN_ID}`;
 
 // state: { installed: bool, allow: string[] | null }  (null = no allowlist)
-// opts:  { source, mode, preset, endpoint, apiKey, reinstall, trustSource }
+// opts:  { source, mode, preset, endpoint, apiKey, reinstall, trustSource,
+//          interventions, interventionAgents, shareOutcomes }
 // OpenClaw refuses installs from outside ClawHub unless confirmed with
 // --force; trustSource is that confirmation, which setup.mjs only sets after
 // the person running it says yes (or passes --yes).
@@ -18,6 +19,12 @@ export function planSetup(state, opts) {
   if (!["none", "recommended", "strict"].includes(preset)) throw new Error("--preset must be none, recommended or strict");
   const endpoint = opts.endpoint ?? DEFAULT_ENDPOINT;
   if (!/^https:\/\/\S+$/.test(endpoint)) throw new Error("--endpoint must be an https URL");
+  const interventions = opts.interventions ?? "observe";
+  if (!["off", "observe", "act"].includes(interventions)) throw new Error("--interventions must be off, observe or act");
+  const agents = opts.interventionAgents ?? null;
+  if (agents !== null && (!Array.isArray(agents) || !agents.length || agents.some((a) => !/^[\w.-]+$/.test(a)))) {
+    throw new Error("--intervention-agents must be a comma-separated list of agent ids");
+  }
 
   const steps = [];
   if (!state.installed || opts.reinstall) {
@@ -40,6 +47,17 @@ export function planSetup(state, opts) {
   steps.push({ label: `Policy endpoint: ${endpoint}`, args: ["config", "set", `${ENTRY}.config.endpoint`, endpoint] });
   steps.push({ label: `Gate mode: ${mode}`, args: ["config", "set", `${ENTRY}.config.control.mode`, mode] });
   steps.push({ label: `Gate preset: ${preset}`, args: ["config", "set", `${ENTRY}.config.control.preset`, preset] });
+  // Follow-up turns after a run: observe logs what it would do (and the
+  // report shows it); act starts them. Outcome sharing sends labels only.
+  if (interventions === "off") {
+    steps.push({ label: "Interventions: off", args: ["config", "unset", `${ENTRY}.config.interventions`], optional: true });
+  } else {
+    const value = { mode: interventions, ...(agents ? { agentIds: agents } : {}),
+      ...(opts.shareOutcomes === false ? { shareOutcomes: false } : {}) };
+    steps.push({ label: `Interventions: ${interventions}${agents ? ` for ${agents.join(", ")}` : ", every agent"}` +
+      `${opts.shareOutcomes === false ? ", outcomes kept local" : ""}`,
+      args: ["config", "set", `${ENTRY}.config.interventions`, JSON.stringify(value), "--strict-json"] });
+  }
   if (opts.apiKey) {
     steps.push({ label: "API key (stored in openclaw.json)", secret: true,
       args: ["config", "set", `${ENTRY}.config.apiKey`, opts.apiKey] });

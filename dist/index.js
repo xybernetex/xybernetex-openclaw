@@ -11,7 +11,8 @@ import { createSupervisor } from "../src/supervisor.js";
 import { createToolGate } from "../src/control.js";
 import { createAuthorizationTracker } from "../src/authz.js";
 import { createFinalizeVerifier } from "../src/verify.js";
-import { createCliScheduler, createInterventions, createRemoteDecider } from "../src/interventions.js";
+import { createCliScheduler, createInterventions, createRemoteDecider, retriable } from "../src/interventions.js";
+import { createOutcomeSender, createOutcomeTracker } from "../src/outcomes.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -22,7 +23,8 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                    
                               
                                                                                            
-                                                                                                                   
+                                                                                                                 
+                                                     
              
                                  
                                                
@@ -64,6 +66,7 @@ export default {
     // Follow-up turns (src/interventions.js): a detached `openclaw agent`
     // turn in the same session, on the same model. Off unless configured.
     let interventions                                                = null;
+    let outcomes                                                 = null;
     const runModels = new Map                (); // runKey -> provider/model, from llm_output
     if (config.interventions) {
       // "remote" (the default when the policy service is configured) asks
@@ -71,8 +74,18 @@ export default {
       const remote = (config.interventions.policy ?? "remote") === "remote" && Boolean(config.endpoint && apiKey);
       interventions = createInterventions({ config: config.interventions, log: writeLog, schedule: createCliScheduler(),
         decide: remote ? createRemoteDecider({ endpoint: config.endpoint, apiKey }) : null });
+      // Outcome signals (src/outcomes.js): logged locally always; sent to the
+      // policy service as labels and counts unless shareOutcomes is false.
+      const quietMinutes = config.interventions.quietMinutes ?? 30;
+      if (typeof quietMinutes !== "number" || !(quietMinutes >= 1 && quietMinutes <= 1440)) {
+        throw new Error("interventions.quietMinutes must be 1-1440");
+      }
+      const share = config.interventions.shareOutcomes !== false && Boolean(config.endpoint && apiKey);
+      outcomes = createOutcomeTracker({ log: writeLog, quietMs: quietMinutes * 60_000,
+        send: share ? createOutcomeSender({ endpoint: config.endpoint, apiKey }) : null });
       writeLog({ type: "interventions_ready", mode: config.interventions.mode ?? "observe", policy: remote ? "remote" : "v0",
-        agentIds: config.interventions.agentIds ?? null, verifyRate: config.interventions.verifyRate ?? 1 });
+        agentIds: config.interventions.agentIds ?? null, verifyRate: config.interventions.verifyRate ?? 1,
+        shareOutcomes: share });
     }
 
     // The user's own turn, before the model reads anything - the only text
@@ -84,9 +97,14 @@ export default {
       api.on("before_agent_run", (event     , ctx     ) => {
         try {
           // Our own follow-up turn is never the user's request.
-          if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) return { outcome: "pass" };
+          if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) {
+            outcomes?.noteFollowupStart(ctx?.sessionKey, runKeyOf(event, ctx));
+            return { outcome: "pass" };
+          }
           const provenance = ctx?.inputProvenance?.kind ?? null;
           const accepted = authz.setRequest(ctx?.sessionKey, event?.prompt, provenance);
+          // The user's next message is how the last run's episode ended.
+          if (accepted) outcomes?.noteUserTurn(ctx?.sessionKey, event?.prompt);
           writeLog({ type: "authz_request", sessionKey: ctx?.sessionKey, accepted, provenance,
             chars: typeof event?.prompt === "string" ? event.prompt.length : null });
         } catch { /* authorization context is best-effort */ }
@@ -118,6 +136,7 @@ export default {
     // Nothing is returned, and OpenClaw runs after_tool_call fire-and-forget,
     // so the agent never waits on the supervisor.
     api.on("after_tool_call", (event     , ctx     ) => {
+      try { outcomes?.noteToolCall(runKeyOf(event, ctx), event?.toolName, Boolean(event?.error)); } catch { /* best-effort */ }
       void supervisor.recordToolCall(runKeyOf(event, ctx), {
         toolName: event.toolName,
         params: event.params,
@@ -134,6 +153,7 @@ export default {
     api.on("llm_output", (event     , ctx     ) => {
       const runKey = runKeyOf(event, ctx);
       writeLog({ runKey, runUsage: event?.usage ?? null, model: event?.model });
+      outcomes?.noteUsage(runKey, Number(event?.usage?.total));
       if (interventions && typeof event?.model === "string") {
         const model = event.model.includes("/") && !event.model.startsWith("@") ? event.model
           : event.provider ? `${event.provider}/${event.model}` : event.model;
@@ -166,6 +186,7 @@ export default {
         toolCalls: supervisor.toolCalls(runKey) };
       writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary });
       supervisor.endRun(runKey);
+      outcomes?.noteRunEnd(runKey, summary.success);
       // Never awaited: an intervention can't hold up the end of a run. The
       // short wait lets OpenClaw report the run's model (llm_output lands
       // just after agent_end), so a follow-up runs on the same model.
@@ -173,12 +194,15 @@ export default {
         setTimeout(() => {
           const model = runModels.get(runKey) ?? null;
           runModels.delete(runKey);
-          void interventions.onRunEnd(runKey, ctx, { ...summary, model }).catch(() => {});
+          void interventions.onRunEnd(runKey, ctx, { ...summary, model })
+            .then((entry     ) => { if (entry) outcomes?.open(entry, { ...summary, retriable: retriable(summary.error) }); })
+            .catch(() => {});
         }, 400);
       }
     });
     api.on("session_end", (_event     , ctx     ) => {
       if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);
+      if (ctx?.sessionKey) outcomes?.endSession(ctx.sessionKey);
     });
   },
 };

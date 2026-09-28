@@ -78,6 +78,40 @@ another session don't count as the user's, but OpenClaw 2026.9.6 supplied no
 provenance on the gateway path in testing, so that protection applies only
 where provenance is provided.
 
+## Outcome signals (2026-09-28, 0.4.0)
+
+Customers' runs have no checker, so learning which interventions pay off on
+their work needs outcomes the plugin can observe. `src/outcomes.js` opens one
+episode per intervention decision (`none` included) and closes it on the
+user's next message in that session, `quietMinutes` without one (default
+30), the session ending, or a newer decision in the same session. An episode
+records what was decided and what was actually applied (observe mode and
+failed starts are `applied: "none"` with probability 1, the correct
+propensity for off-policy evaluation), the run's success, retriability, tool
+calls and tokens, our follow-up's success, tool calls, file writes (successful
+`write`/`edit`/`apply_patch`-style calls) and tokens, and:
+
+- `verify`: `fixed` (our check-your-work turn changed files: the first answer
+  was incomplete), `confirmed`, or `failed`.
+- `user`: the next message classified locally against the previous request:
+  `correction` ("that didn't work", "still failing", "you forgot..."),
+  `repeat` (word-set Jaccard >= 0.6), `thanks` (short and positive), `new`.
+  Neither message is logged or sent. The patterns are deliberately narrow: a
+  new request like "fix the error in parse.py" stays `new`.
+
+Episodes are logged locally (`type: "episode"`) and, unless
+`interventions.shareOutcomes` is false or there's no key, POSTed to
+`/outcome` (cfworker `src/outcome.js`), which validates labels and counts and
+writes one row to the `xybernetex_outcomes` Analytics Engine dataset, kept
+apart from usage. Our follow-up's `before_agent_run` can arrive before the
+decision is logged (the decision is logged only after the turn starts), so a
+follow-up seen early is held and attached when the episode opens.
+
+Known limits: a user who replies in a different session, or never replies,
+gives no signal; `repeat` can't tell "do it again" from "do the same thing to
+another file" at high overlap; file writes through `exec` (e.g. `sed -i`)
+don't count as writes.
+
 ## First control version
 
 Set `plugins.entries.xybernetex-openclaw.config.control` to an object such as:

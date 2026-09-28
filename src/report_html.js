@@ -113,6 +113,18 @@ ${table(["Follow-up", "Decided", "Started", "Finished cleanly"], [
     ["Check your work", num(s.interventions.decided.verify), num(s.interventions.started.verify),
       s.interventions.outcomes.verify.n ? `${num(s.interventions.outcomes.verify.ok)} of ${num(s.interventions.outcomes.verify.n)}` : "–"],
     ["No follow-up", num(s.interventions.decided.none), "–", "–"]])}` : ""}
+${s.outcomes?.episodes ? `<h2>What happened next</h2>
+${table(["After", "Runs", "User replied", "Corrected or asked again", "Thanked"],
+    [["No follow-up", "none"], ["A retry", "retry"], ["A check-your-work turn", "verify"]]
+      .filter(([, k]) => s.outcomes.byApplied[k])
+      .map(([label, k]) => { const g = s.outcomes.byApplied[k];
+        return [label, num(g.n), num(g.replied), g.replied ? `${num(g.correction + g.repeat)} (${pct(g.correction + g.repeat, g.replied)})` : "–",
+          g.replied ? num(g.thanks) : "–"]; }))}
+<div class="two" style="margin-top:12px">
+${table(["Check-your-work result", "Runs"], [["Fixed something (changed files)", num(s.outcomes.verify.fixed)],
+    ["Confirmed the answer", num(s.outcomes.verify.confirmed)], ["Didn't finish", num(s.outcomes.verify.failed)]])}
+${table(["Retries", "Runs"], [["Retried", num(s.outcomes.retry.n)], ["Finished on the retry", num(s.outcomes.retry.finished)]])}
+</div>` : ""}
 
 <h2>Agents</h2>
 ${table(["Agent", "Runs", "Died"], Object.entries(s.runs.byAgent).sort((a, b) => b[1].runs - a[1].runs)

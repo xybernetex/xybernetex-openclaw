@@ -25,6 +25,9 @@ const LOG = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 const { values: args } = parseArgs({ options: {
   mode: { type: "string", default: "observe" },
   preset: { type: "string", default: "recommended" },
+  interventions: { type: "string", default: "observe" },
+  "intervention-agents": { type: "string" },
+  "no-share-outcomes": { type: "boolean", default: false },
   endpoint: { type: "string", default: DEFAULT_ENDPOINT },
   source: { type: "string", default: PACKAGE_ROOT },
   reinstall: { type: "boolean", default: false },
@@ -40,6 +43,10 @@ if (args.help) {
        npx xybernetex-openclaw report [--days 7]   (weekly report)
   --mode observe|enforce          gate mode (default observe: log what it would stop, stop nothing)
   --preset recommended|strict|none  rule set (default recommended)
+  --interventions off|observe|act follow-up turns after a run: a retry when it died, a check-your-work
+                                  turn when it finished (default observe: decide and report, start nothing)
+  --intervention-agents a,b       only these agents get follow-ups (default: every agent)
+  --no-share-outcomes             keep outcome signals on this machine (default: send labels and counts)
   --endpoint URL                  policy endpoint (default ${DEFAULT_ENDPOINT})
   --source PATH|SPEC              where to install the plugin from (default: this package)
   --reinstall                     reinstall even if already installed
@@ -118,7 +125,9 @@ if ((!installed || args.reinstall) && !trustSource && !args["dry-run"]) {
 let steps;
 try {
   steps = planSetup(state, { source: args.source, mode: args.mode, preset: args.preset, endpoint: args.endpoint,
-    apiKey: apiKey || null, reinstall: args.reinstall, trustSource });
+    apiKey: apiKey || null, reinstall: args.reinstall, trustSource, interventions: args.interventions,
+    interventionAgents: args["intervention-agents"] ? args["intervention-agents"].split(",").map((a) => a.trim()).filter(Boolean) : null,
+    shareOutcomes: !args["no-share-outcomes"] });
 } catch (err) {
   console.error(err.message);
   process.exit(2);
@@ -131,7 +140,8 @@ for (const step of steps) {
   const p = run(step.args);
   if (p.status !== 0) {
     if (step.optional) {
-      console.log("    (skipped: this OpenClaw version doesn't support it; authorization labels will be off)");
+      console.log(step.args[1] === "unset" ? "    (nothing to turn off)"
+        : "    (skipped: this OpenClaw version doesn't support it; authorization labels will be off)");
       continue;
     }
     console.error(`\nSetup stopped at "${step.label}". Nothing after it was changed.`);
@@ -161,6 +171,8 @@ while (Date.now() < deadline) {
   const ready = tail.split("\n").filter(Boolean).map(json).find((e) => e?.type === "tool_gate_ready");
   if (ready) {
     console.log(`Loaded: gate ${ready.mode}, preset ${ready.preset ?? "none"}, rules ${(ready.ruleIds ?? []).join(", ") || "none"}.`);
+    const iv = tail.split("\n").filter(Boolean).map(json).find((e) => e?.type === "interventions_ready");
+    if (iv) console.log(`Interventions: ${iv.mode}, policy ${iv.policy}, outcomes ${iv.shareOutcomes ? "shared (labels only)" : "kept local"}.`);
     console.log("Generate a report any time with: npx xybernetex-openclaw report");
     process.exit(0);
   }

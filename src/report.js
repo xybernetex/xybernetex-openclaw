@@ -173,6 +173,27 @@ export function summarize(entries, { from = null, to = null } = {}) {
     }
   }
 
+  // Outcomes (src/outcomes.js): what happened after each decision, by what
+  // was actually applied. The user's next message is the closest thing to a
+  // grade a real run gets: a correction or a repeat means the answer missed.
+  const outcomes = { episodes: 0, byApplied: {}, verify: { fixed: 0, confirmed: 0, failed: 0 },
+    retry: { n: 0, finished: 0 } };
+  for (const e of rows.filter((x) => x.type === "episode")) {
+    outcomes.episodes += 1;
+    const a = e.applied ?? "none";
+    const g = (outcomes.byApplied[a] ??= { n: 0, replied: 0, correction: 0, repeat: 0, thanks: 0, new: 0 });
+    g.n += 1;
+    if (["correction", "repeat", "thanks", "new"].includes(e.user)) {
+      g.replied += 1;
+      g[e.user] += 1;
+    }
+    if (a === "verify" && e.verify in outcomes.verify) outcomes.verify[e.verify] += 1;
+    if (a === "retry" && e.followup) {
+      outcomes.retry.n += 1;
+      if (e.followup.success) outcomes.retry.finished += 1;
+    }
+  }
+
   const times = rows.map((e) => Date.parse(e.ts)).filter(Number.isFinite);
   const lat = [...policy.latencies].sort((a, b) => a - b);
   return {
@@ -187,6 +208,7 @@ export function summarize(entries, { from = null, to = null } = {}) {
     policy: { decisions: policy.decisions, errors: policy.errors, actions: policy.actions,
       p50Ms: percentile(lat, 0.5), p95Ms: percentile(lat, 0.95) },
     interventions: iv,
+    outcomes,
   };
 }
 
@@ -224,6 +246,17 @@ export function recommendations(s) {
     out.push(`${wouldHelp} run(s) would have gotten a follow-up (a retry or a check-your-work turn) but interventions are in ` +
       "observe mode. In Xybernetex testing a check-your-work turn lifted task completion by about 11 points; " +
       "set interventions.mode to \"act\" to turn them on.");
+  }
+  const ov = s.outcomes?.verify;
+  const checked = ov ? ov.fixed + ov.confirmed : 0;
+  if (checked >= 5 && ov.fixed / checked >= 0.2) {
+    out.push(`Check-your-work turns changed files in ${ov.fixed} of ${checked} runs (${Math.round(100 * ov.fixed / checked)}%): ` +
+      "the first answer was incomplete more often than it looked.");
+  }
+  const none = s.outcomes?.byApplied?.none;
+  if (none && none.replied >= 10 && (none.correction + none.repeat) / none.replied >= 0.25) {
+    out.push(`After ${none.correction + none.repeat} of ${none.replied} runs without a follow-up, the user's next message ` +
+      "corrected the answer or asked again. Those are the runs a check-your-work turn is for.");
   }
   if (iv?.fallbacks > 0) {
     out.push(`${iv.fallbacks} intervention decision(s) fell back to the local rule because the policy service didn't answer.`);
