@@ -3,7 +3,7 @@
 // touching a real config; scripts/setup.mjs gathers the state and runs them.
 
 export const PLUGIN_ID = "xybernetex-openclaw";
-export const DEFAULT_ENDPOINT = "https://xybernetex-cfworker.christianvalaerutah.workers.dev/evaluate";
+export const DEFAULT_ENDPOINT = "https://api.xybernetex.com/evaluate";
 const ENTRY = `plugins.entries.${PLUGIN_ID}`;
 
 // state: { installed: bool, allow: string[] | null }  (null = no allowlist)

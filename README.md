@@ -351,7 +351,7 @@ Everything that runs through the gateway works: `openclaw tui` (no
 
 | Key | Default | Meaning |
 |---|---|---|
-| `endpoint` | (required) | Policy endpoint URL, ending in `/evaluate` |
+| `endpoint` | (required) | Policy endpoint URL: `https://api.xybernetex.com/evaluate` |
 | `apiKey` | - | Bearer key; `XYBERNETEX_API_KEY` wins if set |
 | `maxToolCallsPerRun` | 50 | Tool-call budget per agent run (the policy's step and cost budget) |
 | `logPath` | `~/.openclaw/xybernetex-supervisor.jsonl` | Decision log |

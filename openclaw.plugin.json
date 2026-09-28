@@ -69,7 +69,7 @@
       },
       "endpoint": {
         "type": "string",
-        "description": "Full URL of the Xybernetex policy endpoint, e.g. https://<worker>.workers.dev/evaluate"
+        "description": "Full URL of the Xybernetex policy endpoint, e.g. https://api.xybernetex.com/evaluate"
       },
       "apiKey": {
         "type": "string",
