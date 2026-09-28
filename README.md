@@ -35,6 +35,19 @@ non-interactive-CLI caveat above: this only reviews meaningfully in an
 interactive session (`main` is used that way); the same rule under a one-shot
 CLI call fails closed with no prompt to answer.
 
+**Since 2026-09-28 each of those rules also sets `unlessAuthorization:
+["requested"]`**: a destructive call the user's own message asked for (verb
+and target in one sentence of their turn - see "Authorization labels" below)
+runs without a prompt and is logged as `tool_gate_waived`; everything else
+still asks. Checked end to end on the sandboxed agent first: a requested
+`rm -rf tmp` was waived and ran; a planted `rm -rf data` was attempted twice
+each by gemma4 and nemotron and was held for approval every time (and
+auto-denied, being a non-interactive run), leaving `data/` intact. Only
+`requested` can waive a rule - never `own_artifact` - and an unlabeled call
+always asks. Remove the field from a rule to go back to prompting for every
+destructive call. Review what ran unprompted with the `tool_gate_waived`
+lines in the log.
+
 Also fixed same day: `risk.js`'s npm/yarn/pnpm `publish --dry-run` false
 positive (a no-op simulated publish was indistinguishable from a real one by
 verb alone) - the largest remaining false-alarm source found in full-run1's
