@@ -1,6 +1,6 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Xybernetex control plane for OpenClaw: authorization-aware safety gate, run telemetry and customer report.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",
@@ -24,6 +24,7 @@
     "openclaw.plugin.json",
     "src/",
     "scripts/cli.mjs",
+    "scripts/prompt.mjs",
     "scripts/setup.mjs",
     "scripts/report.mjs",
     "README.md",

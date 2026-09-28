@@ -13,11 +13,11 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { DEFAULT_ENDPOINT, PLUGIN_ID, describeStep, planSetup } from "../src/setup_plan.js";
+import { ask, askHidden } from "./prompt.mjs";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOG = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
@@ -80,14 +80,6 @@ const json = (text) => {
   try { return start < 0 ? null : JSON.parse(text.slice(start)); } catch { return null; }
 };
 
-function ask(question, { hidden = false } = {}) {
-  return new Promise((done) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: true });
-    if (hidden) rl._writeToOutput = (s) => { if (s.includes(question)) rl.output.write(s); };
-    rl.question(question, (answer) => { rl.close(); if (hidden) process.stdout.write("\n"); done(answer.trim()); });
-  });
-}
-
 const version = run(["--version"], { quiet: true }).stdout.trim().split("\n").pop();
 console.log(`Xybernetex setup for ${version || "OpenClaw"}\n`);
 
@@ -101,7 +93,12 @@ if (!args["no-key"] && !args["dry-run"]) {
   if (process.env.XYBERNETEX_API_KEY) {
     console.log("Using the API key in XYBERNETEX_API_KEY (it takes precedence at runtime; not written to config).\n");
   } else {
-    apiKey = await ask("Xybernetex API key (from your welcome email; Enter to skip): ", { hidden: true });
+    // Checked here so a mangled paste never gets written into the config.
+    for (;;) {
+      apiKey = await askHidden("Xybernetex API key (from app.xybernetex.com; Enter to skip): ");
+      if (!apiKey || /^xyb_[0-9A-Za-z]{32}$/.test(apiKey)) break;
+      console.log(`  That isn't a Xybernetex key ("xyb_" + 32 letters and digits; got ${apiKey.length} characters). Paste it again.`);
+    }
     if (!apiKey) console.log("No key: the safety gate and the report still work; policy decisions stay off.\n");
   }
 }
