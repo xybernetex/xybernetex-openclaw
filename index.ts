@@ -10,7 +10,7 @@ import { createSupervisor } from "./src/supervisor.js";
 import { createToolGate } from "./src/control.js";
 import { createAuthorizationTracker } from "./src/authz.js";
 import { createFinalizeVerifier } from "./src/verify.js";
-import { createCliScheduler, createInterventions } from "./src/interventions.js";
+import { createCliScheduler, createInterventions, createRemoteDecider } from "./src/interventions.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -21,7 +21,7 @@ type Config = {
   logPath?: string;
   proposalTelemetry?: boolean;
   verifyBeforeFinish?: { agentIds: string[]; instruction?: string; minToolCalls?: number };
-  interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number };
+  interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number; policy?: "remote" | "v0" };
   control?: {
     mode?: "observe" | "enforce";
     preset?: "none" | "recommended" | "strict";
@@ -65,8 +65,12 @@ export default {
     let interventions: ReturnType<typeof createInterventions> | null = null;
     const runModels = new Map<string, string>(); // runKey -> provider/model, from llm_output
     if (config.interventions) {
-      interventions = createInterventions({ config: config.interventions, log: writeLog, schedule: createCliScheduler() });
-      writeLog({ type: "interventions_ready", mode: config.interventions.mode ?? "observe",
+      // "remote" (the default when the policy service is configured) asks
+      // POST /intervene; "v0" uses the fixed local rule.
+      const remote = (config.interventions.policy ?? "remote") === "remote" && Boolean(config.endpoint && apiKey);
+      interventions = createInterventions({ config: config.interventions, log: writeLog, schedule: createCliScheduler(),
+        decide: remote ? createRemoteDecider({ endpoint: config.endpoint, apiKey }) : null });
+      writeLog({ type: "interventions_ready", mode: config.interventions.mode ?? "observe", policy: remote ? "remote" : "v0",
         agentIds: config.interventions.agentIds ?? null, verifyRate: config.interventions.verifyRate ?? 1 });
     }
 

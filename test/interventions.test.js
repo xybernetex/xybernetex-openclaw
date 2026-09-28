@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EventEmitter } from "node:events";
-import { MARKER, MESSAGES, createCliScheduler, createInterventions, decideV0, isOurs, retriable } from "../src/interventions.js";
+import { MARKER, MESSAGES, createCliScheduler, createInterventions, createRemoteDecider, decideV0, isOurs, retriable } from "../src/interventions.js";
 import plugin from "../index.ts";
 
 const ctx = { sessionKey: "agent:main:s1", agentId: "main" };
@@ -142,4 +142,23 @@ test("the plugin wires it up: decisions are logged, and our turn is never the us
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("the remote decider sends only the run's shape and falls back to v0 when the service can't answer", async () => {
+  const sent = [];
+  const decide = createRemoteDecider({ endpoint: "https://api.example/evaluate", apiKey: "k",
+    fetchImpl: async (url, init) => { sent.push({ url, init }); return new Response(JSON.stringify({ action: "verify", probability: 0.9, rule: "verify-helps", policy: "v0-targeted" })); } });
+  const d = await decide({ success: true, toolCalls: 4, model: "m", error: "secret error text", durationMs: 5 });
+  assert.deepEqual(d, { action: "verify", probability: 0.9, rule: "verify-helps", policy: "v0-targeted" });
+  assert.equal(sent[0].url, "https://api.example/intervene");
+  assert.deepEqual(JSON.parse(sent[0].init.body), { summary: { success: true, retriable: false, toolCalls: 4, model: "m" } });
+  assert.ok(!sent[0].init.body.includes("secret error text"));
+
+  const down = createRemoteDecider({ endpoint: "https://api.example/evaluate", apiKey: "k", fetchImpl: async () => { throw new Error("offline"); } });
+  const f = await down({ success: false, error: "incomplete_turn", toolCalls: 1 });
+  assert.deepEqual({ action: f.action, rule: f.rule, policy: f.policy }, { action: "retry", rule: "fallback:v0-retry-on-death", policy: "local-v0" });
+  assert.match(f.fallbackReason, /offline/);
+  const junk = createRemoteDecider({ endpoint: "https://api.example/evaluate", apiKey: "k",
+    fetchImpl: async () => new Response(JSON.stringify({ action: "delete-everything" })) });
+  assert.equal((await junk({ success: true, toolCalls: 0 })).policy, "local-v0");
 });

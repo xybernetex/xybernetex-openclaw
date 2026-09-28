@@ -58,6 +58,28 @@ export function decideV0(summary, { verifyRate = 1, random = Math.random } = {})
   return { action: verify ? "verify" : "none", probability: verify ? verifyRate : 1 - verifyRate, rule: "v0-verify" };
 }
 
+// decide() backed by the policy service (POST /intervene next to /evaluate).
+// Sends only the run's shape - success, whether a failure looks retriable,
+// tool-call count, model id - never prompts, files or error text. Falls back
+// to the local v0 rule (logged as such) if the service can't answer.
+export function createRemoteDecider({ endpoint, apiKey, fetchImpl = fetch, timeoutMs = 3000, fallback = (s) => decideV0(s) }) {
+  const url = endpoint.replace(/\/evaluate\/?$/, "") + "/intervene";
+  return async (summary) => {
+    try {
+      const res = await fetchImpl(url, { method: "POST", signal: AbortSignal.timeout(timeoutMs),
+        headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+        body: JSON.stringify({ summary: { success: summary.success, retriable: retriable(summary.error),
+          toolCalls: summary.toolCalls, model: summary.model ?? null } }) });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok || !["none", "retry", "verify"].includes(out.action)) throw new Error(`HTTP ${res.status} ${out.error ?? ""}`.trim());
+      return { action: out.action, probability: out.probability, rule: out.rule, policy: out.policy ?? null };
+    } catch (err) {
+      const local = fallback(summary);
+      return { ...local, rule: `fallback:${local.rule}`, policy: "local-v0", fallbackReason: String(err?.message ?? err).slice(0, 120) };
+    }
+  };
+}
+
 // schedule() for createInterventions: a detached `openclaw agent` turn in the
 // same session, on the same model. `entry` is OpenClaw's own entry script
 // (the gateway runs from it, so process.argv[1] by default).
@@ -131,7 +153,9 @@ export function createInterventions({ schedule, log = () => {}, config = {}, dec
       } catch (err) {
         decision = { action: "none", probability: 1, rule: `decide-failed: ${String(err?.message ?? err).slice(0, 80)}` };
       }
-      const entry = { ...base, action: decision.action, probability: decision.probability, rule: decision.rule, scheduled: false };
+      const entry = { ...base, action: decision.action, probability: decision.probability, rule: decision.rule,
+        policy: decision.policy ?? "local-v0", ...(decision.fallbackReason ? { fallbackReason: decision.fallbackReason } : {}),
+        scheduled: false };
       if (mode === "act" && (decision.action === "retry" || decision.action === "verify")) {
         // Counted before trying, so a failing scheduler can never loop.
         perSession.set(sessionKey, attempts + 1);

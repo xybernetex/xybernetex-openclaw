@@ -27,7 +27,8 @@
         "properties": {
           "mode": { "type": "string", "enum": ["observe", "act"], "default": "observe" },
           "agentIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Limit to these agents; omit for all." },
-          "verifyRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "Share of finished runs that get a verify turn." }
+          "verifyRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "v0 policy only: share of finished runs that get a verify turn." },
+          "policy": { "type": "string", "enum": ["remote", "v0"], "default": "remote", "description": "remote: ask the policy service (POST /intervene), falling back to v0 if it can't answer. v0: the fixed local rule." }
         }
       },
       "proposalTelemetry": {
