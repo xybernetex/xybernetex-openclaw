@@ -101,6 +101,13 @@ export function createSupervisor({
         log({ ...entry, latencyMs: now() - started, error: `HTTP ${res.status}: ${body.error ?? "no body"}` });
         return;
       }
+      // A 2xx whose body didn't parse (seen live under load) is a failed call,
+      // not a decision: pushing its missing action would poison the history,
+      // and the Worker rejects every later request until it scrolls out.
+      if (typeof body.action !== "string") {
+        log({ ...entry, latencyMs: now() - started, error: `HTTP ${res.status}: response carried no action` });
+        return;
+      }
       // The policy was trained with its own past decisions as input, so they
       // feed forward exactly as if enforced - even though nothing is here.
       run.recentActions.push(body.action);

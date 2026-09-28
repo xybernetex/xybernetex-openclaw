@@ -116,6 +116,23 @@ test("endpoint failures are logged and don't advance the action history", async 
   assert.match(offlineLogs[0].error, /ENOTFOUND/);
 });
 
+test("a 2xx without a readable action is a failure, and doesn't poison the history", async () => {
+  const requests = [];
+  let n = 0;
+  const fetchImpl = async (url, init) => {
+    requests.push(JSON.parse(init.body).snapshot);
+    n += 1;
+    return n === 1 ? new Response("<html>edge hiccup</html>", { status: 200 })
+                   : new Response(JSON.stringify({ action: "CONTINUE" }), { status: 200 });
+  };
+  const { supervisor, logs } = supervisorWith({ fetchImpl });
+  supervisor.recordToolCall("r", { toolName: "t", params: {} });
+  supervisor.recordToolCall("r", { toolName: "t", params: {} });
+  await supervisor.recordToolCall("r", { toolName: "t", params: {} });
+  assert.match(logs[0].error, /no action/);
+  assert.deepEqual(requests.map((s) => s.recent_actions), [[], [], ["CONTINUE"]]);
+});
+
 test("runs are tracked independently and evicted oldest-first", async () => {
   const endpoint = fakeEndpoint();
   const { supervisor } = supervisorWith(endpoint, { maxTrackedRuns: 2 });
