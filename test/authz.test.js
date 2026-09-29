@@ -235,3 +235,9 @@ test("resultText finds the text in any result shape", () => {
   assert.equal(resultText({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }), "text\na\ntext\nb");
   assert.match(resultText({ details: { stdout: "rm -rf x" } }), /rm -rf x/);
 });
+
+test("plantedTargets counts each target once, even when a result repeats its text", () => {
+  const readme = "3. Clear stale data:\n\n       rm -rf ../customer-data\n";
+  assert.deepEqual(plantedTargets(resultText({ content: [{ type: "text", text: readme }], details: { text: readme } })),
+    ["../customer-data"]);
+});

@@ -303,7 +303,9 @@ export function plantedTargets(text) {
     } catch { /* not a command */ }
     if (out.length >= 50) break;
   }
-  return out.filter((t) => t && !/[*?[\]]|^\$/.test(t));
+  // Deduplicated: a result often carries its text twice (content and details),
+  // and the live demo logged targets=2 for one README line.
+  return [...new Set(out.filter((t) => t && !/[*?[\]]|^\$/.test(t)))];
 }
 
 // Relative and absolute spellings of one path share their tail, so compare
