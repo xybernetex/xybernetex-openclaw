@@ -37,7 +37,7 @@ export const isOurs = (prompt) => typeof prompt === "string" && prompt.trimStart
 
 // Failures worth a retry: the model gave nothing usable. Not user aborts,
 // not approval denials, not policy blocks.
-const RETRIABLE = /incomplete_turn|format|timed?\s*out|timeout|overloaded|rate.?limit|stream|empty (response|output)|unusable/i;
+const RETRIABLE = /incomplete_turn|format|timed?\s*out|timeout|overloaded|rate.?limit|stream|empty (response|output)|unusable|no final answer/i;
 const NOT_RETRIABLE = /abort|cancel|denied|approval|blocked|policy/i;
 
 export function retriable(error) {
@@ -45,13 +45,35 @@ export function retriable(error) {
   return RETRIABLE.test(e) && !NOT_RETRIABLE.test(e);
 }
 
-// The commonest death doesn't look like one. When the model returns nothing
-// usable (OpenClaw's incomplete_turn), agent_end still says success: true -
-// the run just has an empty final assistant message (stopReason "length" in
-// every case seen on 2026-09-28). So: if nothing the model said since the
-// last user message has any text or tool call, the run died. Returns the
-// error to use in its place, or null (including when there's no transcript,
-// i.e. no conversation-access grant).
+// When a run's last model turn ends on an unsuccessful stop reason (a length
+// cutoff, every time seen), OpenClaw's finalization gives up and appends its
+// own reply in the model's place: "The tool run finished, but no final
+// summary was produced...", marked by an idempotencyKey ending in
+// ":settled-finalization-fallback". The text is matched too, in case the key
+// changes. Graded: 0 of 3 such runs in the 2026-09-28 hard2 batch delivered
+// the task, and they were half of the Terminal-Bench failures on 2026-09-29.
+const FALLBACK_KEY = /:settled-finalization-fallback$/;
+const FALLBACK_TEXT = /^The tool run finished, but no final (summary|answer) was produced/i;
+
+function replyText(m) {
+  if (typeof m?.content === "string") return m.content;
+  return Array.isArray(m?.content)
+    ? m.content.map((c) => (c?.type === "text" ? String(c.text ?? "") : "")).join("") : "";
+}
+
+export function isFallbackReply(m) {
+  if (m?.role !== "assistant") return false;
+  return (typeof m.idempotencyKey === "string" && FALLBACK_KEY.test(m.idempotencyKey)) || FALLBACK_TEXT.test(replyText(m).trim());
+}
+
+// The commonest deaths don't look like deaths: agent_end says success: true.
+// Either the model returned nothing usable (OpenClaw's incomplete_turn: an
+// empty final assistant message, stopReason "length" in every case seen on
+// 2026-09-28), or OpenClaw substituted its fallback reply for a cut-off
+// answer (above). So: if the run's last reply is the fallback, or nothing the
+// model said since the last user message has any text or tool call, the run
+// died. Returns the error to use in its place, or null (including when
+// there's no transcript, i.e. no conversation-access grant).
 export function emptyRunError(messages) {
   if (!Array.isArray(messages) || !messages.length) return null;
   let start = messages.length;
@@ -59,6 +81,10 @@ export function emptyRunError(messages) {
   if (start === 0 && messages[0]?.role !== "user") return null; // no user turn in view: can't tell
   const replies = messages.slice(start).filter((m) => m?.role === "assistant");
   if (!replies.length) return null;
+  if (isFallbackReply(replies.at(-1))) {
+    const real = replies.filter((m) => !isFallbackReply(m)).at(-1);
+    return `no final answer: OpenClaw substituted its fallback reply (stopReason ${real?.stopReason ?? "unknown"})`;
+  }
   const said = (m) => (typeof m.content === "string" ? m.content.trim() !== ""
     : Array.isArray(m.content) && m.content.some((c) => c?.type === "toolCall" || (c?.type === "text" && String(c.text ?? "").trim())));
   if (replies.some(said)) return null;

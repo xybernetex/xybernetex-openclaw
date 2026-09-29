@@ -1,6 +1,6 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Xybernetex Safety Gate for OpenClaw: holds destructive actions nobody asked for, so planted instructions can't authorize themselves and your own requests run without a prompt. Plus check-your-work and retry follow-ups, and a report.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+- **Cut-off answers are recognized as deaths.** When the model's final turn
+  hits its output limit, OpenClaw appends its own reply in the model's place
+  ("The tool run finished, but no final summary was produced...") and reports
+  the run as a success. The plugin now treats that as a death, so it can be
+  retried. Checked against 198 graded runs: every run ending this way had
+  failed its task (5 of 5), and no finished run was misread. On the outside
+  benchmark tasks run on 2026-09-29 this was half of all failures.
+
 ## 0.4.0
 
 - **Planted deletes can't authorize themselves, in any form.** When something

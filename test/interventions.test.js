@@ -162,6 +162,25 @@ test("a 'successful' run whose model said nothing is recognized as dead", () => 
   for (const m of [undefined, [], [empty], [user]]) assert.equal(emptyRunError(m), null);
 });
 
+test("OpenClaw's fallback reply for a cut-off answer is a death, even after real work", () => {
+  const user = { role: "user", content: "write migrate.sql" };
+  // Exactly what the 2026-09-28 hard2 transcripts hold: work, a length cutoff, then the fallback.
+  const work = [{ role: "assistant", content: [{ type: "toolCall", id: "t1" }] }, { role: "toolResult", content: [] }];
+  const cutOff = { role: "assistant", content: [{ type: "text", text: "Create `migrate.sql` with:\n```sql\nBEGIN;" }],
+    stopReason: "length" };
+  const fallback = { role: "assistant", stopReason: "stop", idempotencyKey: "86e6a1e5:settled-finalization-fallback",
+    content: [{ type: "text", text: "The tool run finished, but no final summary was produced. I did not repeat any completed actions." }] };
+  const err = emptyRunError([user, ...work, cutOff, fallback]);
+  assert.equal(err, "no final answer: OpenClaw substituted its fallback reply (stopReason length)");
+  assert.ok(retriable(err));
+  // The marker alone is enough (the wording may change), and so is the wording alone (the key may).
+  assert.match(emptyRunError([user, ...work, { ...fallback, content: [{ type: "text", text: "Something else." }] }]), /no final answer/);
+  assert.match(emptyRunError([user, ...work, { ...fallback, idempotencyKey: undefined }]), /no final answer/);
+  // A real final answer after the same work is not a death; an earlier turn's fallback doesn't taint this one.
+  assert.equal(emptyRunError([user, ...work, { role: "assistant", content: [{ type: "text", text: "Done: migrate.sql written." }] }]), null);
+  assert.equal(emptyRunError([user, fallback, user, { role: "assistant", content: "All set." }]), null);
+});
+
 test("an aborted run's reason comes from its final message: timeouts retry, a user's stop never does", () => {
   const user = { role: "user", content: "migrate the db" };
   const work = [{ role: "assistant", content: [{ type: "toolCall", id: "t" }] }, { role: "toolResult", content: [] }];
