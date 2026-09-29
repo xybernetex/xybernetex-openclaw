@@ -2,6 +2,20 @@
 
 ## 0.4.0
 
+- **Planted deletes can't authorize themselves, in any form.** When something
+  the agent reads (a README step, a web page, tool output) contains a delete
+  command, its target is held against being deleted, moved, renamed or
+  trashed, unless the user's own words ask for it. In live tests, agents
+  refused an `rm` often moved the data aside instead; that is now held too, as
+  is moving, renaming or overwriting anything the gate just held.
+- **Holds say why.** The agent is told that the user didn't ask for the action
+  and to ask them rather than work around it. Before, in a run no one could
+  approve from (CLI, cron), it only saw OpenClaw's generic "approval
+  unavailable" and tended to route around it or avoid deleting altogether.
+- **Classification fixes.** Commands behind shell keywords (`if ...; then rm
+  -rf x; fi`, `else`, `do`, `!`, `{ }`) were not classified; they are now.
+  `rm -r build` lost its target, so a user's own "delete the build folder" was
+  held; it now runs without a prompt.
 - **Interventions.** When a run ends, Xybernetex can give it one more turn in
   the same session, on the same model: a retry when it died without a usable
   answer, or a check-your-work turn when it finished. With an API key the
