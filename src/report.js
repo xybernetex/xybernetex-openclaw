@@ -228,7 +228,7 @@ export function recommendations(s) {
   }
   if (s.runs.died > 0 && s.runs.ended > 0) {
     out.push(`${s.runs.died} of ${s.runs.ended} runs ended without finishing (${Math.round(100 * s.runs.died / s.runs.ended)}%). ` +
-      "In Xybernetex testing, retrying a run that died recovered about half of them.");
+      "In Xybernetex testing, a same-model retry finished about a third of the runs that had died.");
   }
   if (s.gate.denied > 0) {
     out.push(`${s.gate.denied} approval(s) were denied or expired. Unattended runs (cron, one-shot CLI) can't show an ` +
@@ -244,7 +244,7 @@ export function recommendations(s) {
   const wouldHelp = iv ? iv.decided.retry + iv.decided.verify - iv.started.retry - iv.started.verify : 0;
   if (iv && (iv.modes.observe ?? 0) > 0 && wouldHelp > 0) {
     out.push(`${wouldHelp} run(s) would have gotten a follow-up (a retry or a check-your-work turn) but interventions are in ` +
-      "observe mode. In Xybernetex testing a check-your-work turn lifted task completion by about 11 points; " +
+      "observe mode. In Xybernetex testing a check-your-work turn lifted task completion by about 10 points; " +
       "set interventions.mode to \"act\" to turn them on.");
   }
   const ov = s.outcomes?.verify;

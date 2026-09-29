@@ -9,6 +9,11 @@
   retried. Checked against 198 graded runs: every run ending this way had
   failed its task (5 of 5), and no finished run was misread. On the outside
   benchmark tasks run on 2026-09-29 this was half of all failures.
+- **Numbers updated to the held-out results.** The README and the report now
+  cite the pooled 198-run measurement (a same-model retry finished 35% of
+  dead runs; a check-your-work turn added 10 points) instead of the first
+  90-run batch's (54%, 11 points). The policy service's rule is now the same
+  for every model: the earlier per-model split did not hold up on new tasks.
 
 ## 0.4.0
 

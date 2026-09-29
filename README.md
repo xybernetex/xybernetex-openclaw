@@ -50,12 +50,17 @@ tokens by model, and plain-language next steps.
 **Rescues and checks runs.** When a run ends, Xybernetex decides whether it
 needs one more turn in the same session, on the same model:
 
-- **Retry** when the run died without a usable answer. In our testing one
-  retry finished 54% of runs that had died.
+- **Retry** when the run died without a usable answer. On our benchmark (198
+  hard multi-step runs, 9 models, 22 tasks), one same-model retry finished
+  35% of the runs that had died.
 - **Check your work** when the run finished: re-read the request, confirm the
-  files and outputs, fix anything missing. In our testing this lifted task
-  success by 11 points on hard multi-step tasks, but the gain depends heavily
-  on the model, so with an API key the policy service picks which runs get it.
+  files and outputs, fix anything missing. On the same benchmark this lifted
+  task success by 10 points (72% to 82%), for about half again as many tokens
+  per completed task. With an API key the policy service decides which runs
+  get one, and holds a share of runs out so the effect stays measurable.
+
+The same follow-ups run on a stronger model did better still (a retry rescued
+62%, a check added 18 points); choosing the follow-up's model is next.
 
 Setup starts this in observe mode: every decision is logged and shown in the
 report, and no turn is started. To let it act:
