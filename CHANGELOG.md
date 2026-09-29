@@ -2,6 +2,15 @@
 
 ## 0.4.2
 
+- **Commands hidden by quoting are classified.** The shell runs `$(...)` and
+  backticks inside double quotes and unquoted heredocs, and runs the string
+  given to `bash -c`, `sh -c`, `pwsh -Command`, `cmd /c` or `eval`; the gate
+  used to strip quoted text before judging a command, so
+  `bash -c "rm -rf data"` or `echo "$(rm -rf data)"` passed as harmless. Those
+  inner commands are now judged too (the worst tier wins). Single quotes and
+  quoted heredocs stay literal, so an agent writing docs that mention
+  `rm -rf` isn't held. Replayed on the 1,402 experiment tool calls: no
+  classification changed.
 - **The agent can clean up its own files.** A plain delete (`rm`, `unlink`,
   `del`, `Remove-Item`; no recursion) of single files the agent itself created
   in the session - written, added by a patch or redirected to - now runs
@@ -12,6 +21,8 @@
   Tool caches (`__pycache__`, `.pyc`) may go unless a move named them. Any
   visible move onto a file drops it from the agent's own. Rules opt in with
   `unlessAuthorization: ["requested", "own_files"]`; both presets do.
+  A plain delete of the agent's own file also gets past the memory of an
+  earlier hold on it (moving or renaming it is still blocked).
 - **Held-out runs keep their probability.** When the follow-up rule leaves a
   run untreated on purpose (the 10% comparison group), its outcome episode now
   records that probability (0.1) instead of 1, so weighted estimates of what

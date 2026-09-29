@@ -165,10 +165,120 @@ export function meetsRiskThreshold(tier, threshold) {
   return tier !== null && SEVERITY[tier] >= SEVERITY[threshold];
 }
 
-export function classifyShellCommand(command) {
+// Commands a command line runs that quoting hides from the segments above:
+// `$(...)` and backticks (expanded inside double quotes and unquoted
+// heredocs), and the string handed to `bash -c`, `eval` and the like. Each is
+// classified as a command line of its own; the worst tier wins.
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh", "ash", "fish", "pwsh", "powershell", "cmd"]);
+const SHELL_C_FLAG = /^(-[a-z]*c|-command|\/c|\/k)$/i;
+const HEREDOC = /<<(-?)\s*(['"]?)([A-Za-z_][\w.-]*)\2/y;
+const MAX_DEPTH = 3;
+
+// Index of the ) closing a $( whose body starts at `start` (or text.length).
+function balanced(text, start) {
+  let depth = 1;
+  let quote = null;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (c === "\\" && quote === '"') i += 1;
+    } else if (c === "'" || c === '"') quote = c;
+    else if (c === "\\") i += 1;
+    else if (c === "(") depth += 1;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return text.length;
+}
+
+// $(...) and `...` bodies the shell would run. With quotes = false (an
+// unquoted heredoc body), quote characters are literal text.
+function substitutions(text, quotes = true) {
+  const out = [];
+  let quote = null;
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const c = text[i];
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      i += 1;
+      continue;
+    }
+    if (c === "\\") { i += 2; continue; }
+    if (quotes && c === "'" && quote === null) { quote = "'"; i += 1; continue; }
+    if (quotes && c === '"') { quote = quote === '"' ? null : '"'; i += 1; continue; }
+    if (quotes && quote === null && text.startsWith("<<", i) && !text.startsWith("<<<", i)) {
+      HEREDOC.lastIndex = i;
+      const m = HEREDOC.exec(text);
+      if (m) {
+        const after = i + m[0].length;
+        const lineEnd = text.indexOf("\n", after);
+        const bodyStart = lineEnd === -1 ? n : lineEnd + 1;
+        // The rest of the heredoc's own line is ordinary command text.
+        out.push(...substitutions(text.slice(after, bodyStart)));
+        let end = bodyStart;
+        while (end < n) {
+          const nl = text.indexOf("\n", end);
+          const line = text.slice(end, nl === -1 ? n : nl);
+          if ((m[1] ? line.replace(/^\t+/, "") : line) === m[3]) break;
+          end = nl === -1 ? n : nl + 1;
+        }
+        if (!m[2]) out.push(...substitutions(text.slice(bodyStart, end), false)); // unquoted: the body expands
+        const nl = text.indexOf("\n", end);
+        i = nl === -1 ? n : nl + 1;
+        continue;
+      }
+    }
+    if (text.startsWith("$(", i) && !text.startsWith("$((", i)) {
+      const j = balanced(text, i + 2);
+      out.push(text.slice(i + 2, j));
+      i = j + 1;
+      continue;
+    }
+    if (c === "`") {
+      let j = text.indexOf("`", i + 1);
+      if (j === -1) j = n;
+      out.push(text.slice(i + 1, j));
+      i = j + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return out;
+}
+
+// The strings given to `bash -c`, `sh -lc`, `pwsh -Command`, `cmd /c` and `eval`.
+function handedToShells(command) {
+  const tokens = [...command.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g)]
+    .map((m) => (m[1] !== undefined ? m[1].replace(/\\"/g, '"') : m[2] !== undefined ? m[2] : m[3]));
+  const out = [];
+  tokens.forEach((tok, i) => {
+    const name = tok.toLowerCase().replace(/^.*[\\/]/, "").replace(/\.(exe|cmd|bat|ps1|sh)$/, "");
+    if (name === "eval" && i + 1 < tokens.length) out.push(tokens.slice(i + 1).join(" "));
+    else if (SHELLS.has(name)) {
+      for (let j = i + 1; j < Math.min(i + 4, tokens.length); j++) {
+        if (SHELL_C_FLAG.test(tokens[j])) {
+          const rest = tokens.slice(j + 1);
+          if (rest.length) out.push(["cmd", "pwsh", "powershell"].includes(name) ? rest.join(" ") : rest[0]);
+          break;
+        }
+        if (!tokens[j].startsWith("-")) break;
+      }
+    }
+  });
+  return out;
+}
+
+export function classifyShellCommand(command, depth = 0) {
   if (typeof command !== "string" || !command.trim()) return "none";
   let tier = SQL_CLIENT.test(command) && SQL_DESTRUCTIVE.test(command) ? "destructive" : "none";
   for (const segment of segments(command)) tier = worst(tier, classifySegment(segment, command));
+  if (depth < MAX_DEPTH && tier !== "destructive") {
+    for (const inner of [...substitutions(command), ...handedToShells(command)]) {
+      tier = worst(tier, classifyShellCommand(inner, depth + 1));
+    }
+  }
   return tier;
 }
 

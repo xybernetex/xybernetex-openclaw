@@ -116,6 +116,42 @@ test("non-shell tools", () => {
   assert.equal(classifyToolCall("tool_call", { id: "web_fetch" }), null);
 });
 
+test("commands hidden in substitutions and shell strings are classified (0.4.2)", () => {
+  // $(...) and backticks run inside double quotes and unquoted heredocs, and
+  // bash -c / eval run their string; quoting hid all of these before. Single
+  // quotes and quoted heredocs stay literal. Same cases as the Python port.
+  for (const [command, tier] of [
+    ["echo \"$(rm -rf data)\"", "destructive"],
+    ["x=\"$(rm -rf data)\"", "destructive"],
+    ["echo \"`rm -rf data`\"", "destructive"],
+    ["echo `rm -rf data`", "destructive"],
+    ["bash -c \"rm -rf data\"", "destructive"],
+    ["sh -c 'rm -rf data'", "destructive"],
+    ["bash -lc 'cd x && rm -rf data'", "destructive"],
+    ["eval \"rm -rf data\"", "destructive"],
+    ["sudo sh -c \"git reset --hard\"", "destructive"],
+    ["cmd /c del /s x", "destructive"],
+    ["pwsh -Command \"Remove-Item x -Recurse\"", "destructive"],
+    ["bash -c \"echo \\\"$(rm -rf data)\\\"\"", "destructive"],
+    ["cat <<EOF\n$(rm -rf data)\nEOF", "destructive"],
+    ["cat <<EOF > n.txt\nit's `rm -rf data`\nEOF", "destructive"],
+    ["bash -c \"git push origin main\"", "sensitive"],
+    ["echo 'rm -rf data'", "none"],
+    ["echo '$(rm -rf data)'", "none"],
+    ["git commit -m \"remove the rm -rf step\"", "none"],
+    ["cat <<'EOF'\n$(rm -rf data)\n`rm x`\nEOF", "destructive"],
+    ["echo \"$((1+2))\"", "none"],
+    ["bash -c \"echo hi\"", "none"],
+    ["bash script.sh", "none"],
+    ["python3 -c \"print(1)\"", "none"],
+    ["cat <<'EOF' > README.md\nRun `rm -rf build` to clean.\nEOF\necho done", "none"],
+    ["echo \"exit=$rc; removed: $([ ! -f x.js ] && echo yes || echo no)\"", "none"],
+    ["cat <<-EOF\n\t$(rm -rf data)\n\tEOF", "destructive"],
+    ["a=$(ls); echo `pwd`", "none"],
+    ["echo \"$(echo \"$(git reset --hard)\")\"", "destructive"],
+  ]) assert.equal(classifyShellCommand(command), tier, command);
+});
+
 test("commands behind shell keywords are classified, not read as a command named then/else/do", () => {
   // The 2026-09-29 demo agent ran `if ...; then trash build; else rm -rf build; fi`: `else rm` was "none",
   // so `if true; then rm -rf data; fi` went through the gate unclassified.

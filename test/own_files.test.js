@@ -34,9 +34,11 @@ test("anything more than a plain file delete does not", () => {
   for (const cmd of ["rm -r check_kv.py", "rm -rf check_kv.py", "rm --recursive check_kv.py", "rm -d check_kv.py",
     "rm -rf scratch", "rmdir scratch", "rm scratch",
     "rm check_kv.py kv.py",
-    "rm check_kv.py && python3 x.py", "rm check_kv.py && mv a b",
+    "rm check_kv.py && mv a b", "rm check_kv.py; git reset --hard",
+    "find . -name x -exec mv {} y ';' ; rm check_kv.py", "rm check_kv.py; git mv a b",
     "cd sub && rm check_kv.py", "cd .. && rm check_kv.py", "cd /tmp && rm check_kv.py", "ls",
-    "rm check_kv.py 2>/dev/null", "rm check_kv.py | tee log", "rm $(cat list)",
+    "rm check_kv.py 2>out.log", "rm check_kv.py > log", "rm $(cat list)", "rm `cat list`",
+    "echo $(date); rm check_kv.py",
     "rm check_*.py", "rm ../check_kv.py", "rm ~/check_kv.py", "rm $F", "rm -- -x",
     "shred check_kv.py", "truncate -s 0 check_kv.py", "git rm check_kv.py"]) {
     assert.equal(s.owns(cmd), false, cmd);
@@ -50,9 +52,17 @@ test("the working folder, cd and read-only company are understood", () => {
   for (const [cmd, wd] of [["rm solve.py", "runs/x"], ["del solve.py", "runs/x"], ["Remove-Item solve.py", "runs/x"],
     ["Remove-Item -Path solve.py -Force", "runs/x"], ["del /f /q solve.py", "runs/x"],
     ["cd runs/x && rm solve.py"], ["cd runs && rm x/solve.py && ls -la"],
-    ["rm check_kv.py && ls"], ["rm check_kv.py; cat out.txt"], ["rm ../../check_kv.py", "runs/x"]]) {
+    ["rm check_kv.py && ls"], ["rm check_kv.py; cat out.txt"], ["rm ../../check_kv.py", "runs/x"],
+    ['python3 check_kv.py; echo "exit=$?"; rm check_kv.py && ls check_kv.py 2>&1'],
+    ["rm -f check_kv.py 2>/dev/null; exit 0"], ["rm check_kv.py | tee log"]]) {
     assert.equal(s.owns(cmd, wd), !cmd.startsWith("rm ../"), `${cmd} @ ${wd}`);
   }
+  const s2 = session().wrote("/root/ws/check.py");
+  assert.equal(s2.owns("cd /root/ws && rm check.py"), true);
+  assert.equal(s2.owns("rm check.py", "/root/ws"), true);
+  assert.equal(s2.owns("rm /root/ws/check.py"), true);
+  assert.equal(s2.owns("rm check.py"), false);
+  assert.equal(s2.owns("cd /root && rm check.py"), false);
   for (const [cmd, wd] of [["rm solve.py"], ["rm solve.py", "runs"], ["rm solve.py", "/abs/runs/x"],
     ["rm solve.py", "../runs/x"], ["Remove-Item -Recurse solve.py", "runs/x"], ["del /s solve.py", "runs/x"]]) {
     assert.equal(s.owns(cmd, wd), false, `${cmd} @ ${wd}`);
@@ -121,6 +131,15 @@ test("the gate lets the agent delete its own files without a prompt, never its o
   assert.ok(call("rm -rf scratch", "c2").requireApproval);
   assert.equal(logs.at(-1).authorization, "own_artifact");
   assert.equal(logs.at(-1).waiver, undefined);
+});
+
+test("a held own file can still be deleted plainly later; moving it stays blocked", () => {
+  const { s, call, logs } = gated();
+  s.wrote("check.js");
+  assert.ok(call('rm -f check.js; echo "gone: $([ -f check.js ] || echo yes)"', "c1").requireApproval);
+  assert.equal(call("rm check.js && ls", "c2"), undefined);
+  assert.equal(logs.at(-1).waiver, "own_files");
+  assert.equal(call("mv check.js elsewhere.js", "c3").block, true);
 });
 
 test("the strict preset waives it too; a rule without own_files does not; rules may list own_files", () => {

@@ -32,7 +32,11 @@
 // "own_files" in unlessAuthorization): a plain delete (rm, unlink, del,
 // Remove-Item) of single files the agent itself created this session -
 // written, added by a patch, redirected to with > - that no move has touched
-// since, optionally after a cd and followed by read-only commands (ls, cat).
+// since. The same call may cd and run other commands the risk classifier
+// rates harmless (python3 check.py; ls), but no move: a script can already
+// delete or move files unseen (risk.js can't read inside it), so harmless
+// company adds nothing a planted instruction couldn't do anyway, while a
+// visible move in the same call could land a user's file on the one deleted.
 // Deleting such a file loses only the agent's own content: whatever it
 // replaced was already gone when the agent wrote it. Paths are resolved
 // against the call's workdir and any cd, and must match exactly - a file made
@@ -82,11 +86,10 @@ const PLAIN_DELETE_FLAG = /^(-f|-v|-fv|-vf|--force|--verbose|-force|\/f|\/q)$/i;
 const RECURSIVE_FLAG = /^(-(?=[rfv]*r)[rfv]+|--recursive|-recurse)$/i;
 const PATH_FLAG = /^-(path|literalpath)$/i;
 const CD_COMMANDS = new Set(["cd", "chdir", "pushd", "set-location", "sl"]);
-const READ_ONLY_COMMANDS = new Set(["ls", "dir", "cat", "echo", "pwd", "head", "tail", "wc", "true", "type",
-  "get-childitem", "gci", "get-content", "gc"]);
+const NULL_REDIRECT = /^(\d?>>?|&>)(\/dev\/null|nul|&\d)$|^\d?>&\d$/i;
+const HIDDEN_COMMAND = /`|\$\(/;
 const UNSAFE_TARGET = /[*?[\]{}$`~,]|(^|[/\\])\.\.([/\\]|$)|^-/;
 const ABSOLUTE = /^([/\\]|[a-z]:)/i;
-const UNSAFE_SHELL = /[<>|`]|\$\(/;
 const UNREADABLE_MOVE = /\bxargs\b|\bfind\b.*-exec|\bparallel\b/i;
 // A delete or drop with no target we can read is never "requested" on the
 // strength of a verb alone: "delete the old logs" must not cover `xargs rm`.
@@ -377,14 +380,14 @@ function shellSteps(p) {
   const wd = p.workdir ?? p.cwd;
   let cwd = "";
   if (typeof wd === "string" && wd.trim()) {
-    cwd = !UNSAFE_TARGET.test(wd.trim()) && !ABSOLUTE.test(wd.trim()) ? resolvePath("", wd.trim()) : null;
+    cwd = !UNSAFE_TARGET.test(wd.trim()) ? resolvePath("", wd.trim()) : null;
   }
   const steps = [];
   for (const segment of splitSegments(text)) {
     const { cmd, args } = command(segment);
     if (CD_COMMANDS.has(cmd)) {
       const plain = args.filter((a) => !a.startsWith("-"));
-      const safe = plain.length === 1 && !UNSAFE_TARGET.test(plain[0]) && !ABSOLUTE.test(plain[0]);
+      const safe = plain.length === 1 && !UNSAFE_TARGET.test(plain[0]);
       cwd = cwd !== null && safe ? resolvePath(cwd, plain[0]) : null;
       continue;
     }
@@ -480,6 +483,9 @@ function creations(toolName, params) {
   return { paths, tables, files };
 }
 
+const isMove = (cmd, args) => MOVE_COMMANDS.has(cmd) || (cmd === "git" && args[0] === "mv") ||
+  (cmd === "rsync" && args.includes("--remove-source-files"));
+
 // The paths a call's visible moves name (sources and destinations, resolved
 // against its working folder), and whether it moved things we can't name
 // (globs, xargs, find -exec, a folder we lost track of).
@@ -490,8 +496,7 @@ function moves(toolName, params) {
   const named = [];
   let unreadable = false;
   for (const { cwd, cmd, args, segment } of steps) {
-    if (!(MOVE_COMMANDS.has(cmd) || (cmd === "git" && args[0] === "mv") ||
-          (cmd === "rsync" && args.includes("--remove-source-files")))) continue;
+    if (!isMove(cmd, args)) continue;
     const plain = (cmd === "git" ? args.slice(1) : args).filter((a) => !a.startsWith("-"));
     if (cwd === null || !plain.length || UNREADABLE_MOVE.test(segment) ||
         plain.some((a) => /[*?[\]]|^\$/.test(a) || UNSAFE_TARGET.test(a))) unreadable = true;
@@ -560,15 +565,21 @@ export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3
       if (!s || (toolName !== "exec" && toolName !== "terminal")) return false;
       const p = params && typeof params === "object" ? params : {};
       const text = p.command ?? p.cmd ?? p.input;
-      if (typeof text !== "string" || UNSAFE_SHELL.test(text)) return false;
+      if (typeof text !== "string" || HIDDEN_COMMAND.test(text)) return false;
       let deleted = false;
-      for (const { cwd, cmd, args } of shellSteps(p) ?? []) {
-        if (READ_ONLY_COMMANDS.has(cmd)) continue;
-        if (!OWN_DELETE_COMMANDS.has(cmd) || cwd === null) return false;
+      for (const { cwd, cmd, args, segment } of shellSteps(p) ?? []) {
+        if (!OWN_DELETE_COMMANDS.has(cmd)) {
+          // Company: harmless, and never a move (see the top of this file).
+          if (isMove(cmd, args) || UNREADABLE_MOVE.test(segment) || classifyShellCommand(segment) !== "none") return false;
+          continue;
+        }
+        if (cwd === null) return false;
         const targets = [];
         let recursive = false;
         for (let i = 0; i < args.length; i++) {
           const a = args[i];
+          if (NULL_REDIRECT.test(a)) continue;
+          if (/^[<>]/.test(a) || (/^\d/.test(a) && a.includes(">"))) return false;
           if (PATH_FLAG.test(a) && i + 1 < args.length) { targets.push(args[++i]); continue; }
           if (RECURSIVE_FLAG.test(a)) recursive = true;
           else if (a.startsWith("-") || ((cmd === "del" || cmd === "erase") && a.startsWith("/"))) {

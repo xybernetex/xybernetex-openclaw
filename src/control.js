@@ -54,6 +54,9 @@ const WAIVING_LABELS = Object.freeze(["requested", "own_files"]);
 // agent's own single files (src/authz.js), for rules listing "own_files".
 export function createToolGate({ mode = "observe", preset, rules = [], log = () => {}, authorize = () => null,
   requestsTarget = () => false, ownsFiles = () => false, maxSessions = 200 } = {}) {
+  const onlyOwnFiles = (event, ctx) => {
+    try { return authorize(event, ctx) === "own_artifact" && ownsFiles(event, ctx) === true; } catch { return false; }
+  };
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
   if (!Array.isArray(rules)) throw new Error("control.rules must be an array");
   const ids = new Set();
@@ -168,7 +171,12 @@ export function createToolGate({ mode = "observe", preset, rules = [], log = () 
       return blockFromMemory(event, ctx, plantedRule, plantedReason(planted), "planted");
     }
     const followed = followsHold(state, event, ctx);
-    if (followed) return blockFromMemory(event, ctx, followed[1], followsHoldReason(followed[0]), "followsHold");
+    // A delete of only the agent's own files, untouched since it made them,
+    // can't be a way around a hold: it loses nothing but the agent's own
+    // content. The rules below still decide it (own_files, if listed).
+    if (followed && !onlyOwnFiles(event, ctx)) {
+      return blockFromMemory(event, ctx, followed[1], followsHoldReason(followed[0]), "followsHold");
+    }
     // Classified once per event: risk.js judges from the tool name and
     // params, the same inputs every rule for this tool call shares.
     const riskTier = classifyToolCall(event?.toolName, event?.params);
