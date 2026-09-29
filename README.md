@@ -99,6 +99,30 @@ agent's answer or any file. To keep outcome signals on your machine, set
 `interventions.shareOutcomes` to `false` (or install with
 `--no-share-outcomes`); they still appear in your report.
 
+## What it doesn't do
+
+The gate is a strong layer against agents doing destructive things nobody
+asked for. It is a heuristic, not a sandbox, and you should know its edges:
+
+- **It judges what a call visibly does.** It reads shell commands, file paths,
+  patch contents and action verbs. A command hidden inside a script the agent
+  runs (`python cleanup.py`) is judged as running a script, not as the deletes
+  inside it. Tools it doesn't know how to judge are never matched by its rules.
+- **"Requested" is read from the user's own message.** The action and its
+  target have to appear together, and only the user's turns count, never files,
+  web pages or tool output. Phrasing can still fool it in either direction, and
+  `own_artifact` (cleaning up the agent's own files) never waives a rule.
+- **Where OpenClaw doesn't report where a turn came from,** every turn in the
+  session is treated as the user's. OpenClaw 2026.9.6 doesn't report it on the
+  gateway path.
+- **An approval needs someone to approve it.** Cron jobs and one-shot CLI runs
+  can't show a prompt, so OpenClaw denies the call: a held call there behaves
+  like a blocked one.
+- **Observe mode stops nothing.** It's the default until you switch to enforce.
+
+For untrusted work, pair it with OpenClaw's own sandboxing. Found a way past
+it? Please open an issue, or email chris@xybernetex.com if it's sensitive.
+
 ## Install options
 
 ```bash
