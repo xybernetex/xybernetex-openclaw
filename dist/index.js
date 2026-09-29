@@ -63,7 +63,8 @@ export default {
     // Register the local gate even if remote observation is unavailable.
     // No endpoint failure can disable configured restrictions.
     const gate = createToolGate({ ...config.control, log: writeLog,
-      authorize: (event     , ctx     ) => authz.label(ctx?.sessionKey, event?.toolName, event?.params) });
+      authorize: (event     , ctx     ) => authz.label(ctx?.sessionKey, event?.toolName, event?.params),
+      requestsTarget: (ctx     , target        ) => authz.requestsTarget(ctx?.sessionKey, target) });
 
     // Follow-up turns (src/interventions.js): a detached `openclaw agent`
     // turn in the same session, on the same model. Off unless configured.

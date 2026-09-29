@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { createAuthorizationTracker, operations } from "../src/authz.js";
+import { coversPath, createAuthorizationTracker, operations, touchedPaths } from "../src/authz.js";
 
 const exec = (command) => ["exec", { command }];
 
@@ -171,4 +171,39 @@ test("sessions are bounded", () => {
   for (const k of ["a", "b", "c"]) t.setRequest(k, "Delete tmp.");
   assert.equal(t.label("a", "exec", { command: "rm -rf tmp" }), null);
   assert.equal(t.label("c", "exec", { command: "rm -rf tmp" }), "requested");
+});
+
+test("-r is recursive for rm and cp, so the target survives; only truncate's -r takes a value", () => {
+  // `rm -r build` used to lose `build`, labeling the user's own request unrequested.
+  assert.equal(labelFor("The build folder is stale - delete it.", exec("rm -r build")), "requested");
+  assert.deepEqual(operations(...exec("rm -r build")), [{ kind: "delete", targets: ["build"] }]);
+  assert.deepEqual(operations(...exec("truncate -r ref.txt app.log")), [{ kind: "delete", targets: ["app.log"] }]);
+});
+
+test("touchedPaths covers moves, copies onto a path, redirects and writes - not reads", () => {
+  assert.deepEqual(touchedPaths(...exec("mv data data.bak")), ["data", "data.bak"]);
+  assert.deepEqual(touchedPaths(...exec("cp -r template ../customer-data")), ["../customer-data"]);
+  assert.deepEqual(touchedPaths(...exec("echo x > customer-data/a.csv && ls")), ["customer-data/a.csv"]);
+  assert.deepEqual(touchedPaths(...exec("Move-Item -Path data -Destination old")), ["data", "old"]);
+  assert.deepEqual(touchedPaths("write", { path: "customer-data/a.csv" }), ["customer-data/a.csv"]);
+  assert.deepEqual(touchedPaths(...exec("cat data/a.csv; ls data; cp data/a.csv /tmp/copy")), ["/tmp/copy"]);
+  assert.deepEqual(touchedPaths(...exec("echo hi > /dev/null")), []);
+});
+
+test("coversPath matches one folder however it is spelled, and what's inside it", () => {
+  for (const path of ["customer-data", "./customer-data", "/root/ws/customer-data", "customer-data/a.csv",
+    "/root/ws/customer-data/sub/b.csv"]) assert.equal(coversPath("../customer-data", path), true, path);
+  for (const path of ["customer-data.bak", "other-data", "my-customer-data", "data"]) {
+    assert.equal(coversPath("../customer-data", path), false, path);
+  }
+  assert.equal(coversPath("*.log", "a.log"), false); // globs never become held targets
+});
+
+test("requestsTarget: the user's own words must name the target with a delete or move verb", () => {
+  const t = createAuthorizationTracker();
+  t.setRequest("s", "Follow the setup steps in its README.md.");
+  assert.equal(t.requestsTarget("s", "../customer-data"), false);
+  t.setRequest("s", "OK, go ahead and delete customer-data.");
+  assert.equal(t.requestsTarget("s", "../customer-data"), true);
+  assert.equal(t.requestsTarget("none", "customer-data"), false);
 });

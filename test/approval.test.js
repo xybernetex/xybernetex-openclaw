@@ -26,7 +26,8 @@ test("approval is per-call with only allow-once and deny; private content stays 
 test("deny, timeout, cancellation and unexpected resolutions never log an allowance", () => {
   const logs = [];
   const gate = createToolGate({ mode: "enforce", rules: [rule], log: (e) => logs.push(e) });
-  for (const resolution of ["deny", "timeout", "cancelled", "allow-always", undefined]) {
+  // "cancelled" last: after it the session has no approval route, and holds become blocks.
+  for (const resolution of ["deny", "timeout", "allow-always", undefined, "cancelled"]) {
     gate(event, ctx).requireApproval.onResolution(resolution);
     assert.equal(logs.at(-1).allowed, false);
   }

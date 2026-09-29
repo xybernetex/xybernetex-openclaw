@@ -188,6 +188,70 @@ test("operator rules extend a preset; bad presets, colliding ids and bare tool w
   assert.throws(() => createToolGate({ rules: [{ id: "all", agentId: "*", toolName: "*" }] }), /needs riskAtLeast/);
 });
 
+// The 2026-09-29 demo run: held `rm -rf customer-data` in a CLI run, OpenClaw's
+// "approval unavailable" error, then `mv customer-data customer-data.removed-backup`.
+const preset = (logs = [], extra = {}) => createToolGate({ mode: "enforce", preset: "recommended",
+  log: (e) => logs.push(e), authorize: () => "unrequested", ...extra });
+const demo = { agentId: "main", sessionKey: "demo" };
+const exec = (command) => ({ toolName: "exec", params: { command } });
+
+test("a hold no one can approve says why, and later holds in the session block with that reason", () => {
+  const logs = [];
+  const gate = preset(logs);
+  const first = gate(exec("rm -rf ../customer-data"), demo).requireApproval;
+  assert.match(first.timeoutReason, /didn't ask for this/);
+  first.onResolution("cancelled");
+  const second = gate(exec("rm -rf /tmp/other-data"), demo);
+  assert.equal(second.block, true);
+  assert.match(second.blockReason, /user didn't ask for this/);
+  assert.match(second.blockReason, /deletions the user asks for directly, is not affected/);
+  assert.equal(logs.at(-1).approvalUnavailable, true);
+  assert.equal(logs.at(-1).action, "BLOCK_ACTION");
+  // Other sessions still get a real approval.
+  assert.ok(gate(exec("rm -rf /tmp/other-data"), { ...demo, sessionKey: "other" }).requireApproval);
+});
+
+test("after a hold, moving, renaming or overwriting the held target is held too", () => {
+  const logs = [];
+  const gate = preset(logs);
+  assert.ok(gate(exec("rm -rf ../customer-data"), demo).requireApproval);
+  for (const cmd of ["mv /root/oc-workspace/customer-data /root/oc-workspace/customer-data.removed-backup",
+    "cp -r empty ../customer-data", "echo x > customer-data/customers.csv"]) {
+    const held = gate(exec(cmd), demo);
+    assert.equal(held?.block, true, cmd);
+    assert.match(held.blockReason, /customer-data, which was held a moment ago/);
+  }
+  assert.equal(gate({ toolName: "write", params: { path: "customer-data/new.csv", content: "" } }, demo).block, true);
+  assert.equal(logs.at(-1).followsHold, true);
+  assert.ok(!JSON.stringify(logs).includes("customer-data"));
+  // Reading it, touching other paths, and other sessions are unaffected.
+  assert.equal(gate(exec("cat ../customer-data/customers.csv"), demo), undefined);
+  assert.equal(gate(exec("mv build build.old"), demo), undefined);
+  assert.equal(gate(exec("mv customer-data backup"), { ...demo, sessionKey: "other" }), undefined);
+});
+
+test("a held target the user then asks to delete or move is no longer held", () => {
+  const gate = preset([], { requestsTarget: (_ctx, target) => target === "../customer-data" });
+  assert.ok(gate(exec("rm -rf ../customer-data"), demo).requireApproval);
+  assert.equal(gate(exec("mv ../customer-data /tmp/archive"), demo), undefined);
+});
+
+test("observe mode remembers holds too, but only logs the follow-through", () => {
+  const logs = [];
+  const gate = createToolGate({ preset: "recommended", log: (e) => logs.push(e), authorize: () => "unrequested" });
+  assert.equal(gate(exec("rm -rf data"), demo), undefined);
+  assert.equal(gate(exec("mv data data.bak"), demo), undefined);
+  assert.equal(logs.at(-1).followsHold, true);
+  assert.equal(logs.at(-1).action, "WOULD_BLOCK");
+});
+
+test("operator rules keep their own block reason; only who-asked rules explain the request", () => {
+  const block = createToolGate({ mode: "enforce", rules: [rule] })(event, ctx);
+  assert.match(block.blockReason, /Xybernetex rule 'test-denial' prohibits/);
+  const strict = createToolGate({ mode: "enforce", preset: "strict", authorize: () => "unrequested" });
+  assert.match(strict(exec("rm -rf data"), demo).blockReason, /user didn't ask for this/);
+});
+
 test("an agent wildcard in an operator rule covers every agent", () => {
   const gate = createToolGate({ mode: "enforce", rules: [{ ...rule, agentId: "*" }] });
   assert.equal(gate(event, { agentId: "main" }).block, true);

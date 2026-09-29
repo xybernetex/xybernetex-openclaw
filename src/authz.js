@@ -125,7 +125,10 @@ function command(segment) {
   return { cmd, args: rest.slice(1) };
 }
 
-function plainArgs(raw) {
+// cmd scopes VALUE_FLAGS: they take a value only for truncate. Everywhere
+// else -r is recursive, and skipping the next word lost `build` from
+// `rm -r build`, labeling the user's own "delete the build folder" unrequested.
+function plainArgs(raw, cmd) {
   // PowerShell passes lists as `a, b` or `a,b`.
   const args = raw.flatMap((a) => (a.startsWith("-") ? [a] : a.split(",").map((s) => s.trim()).filter(Boolean)));
   const out = [];
@@ -133,7 +136,7 @@ function plainArgs(raw) {
     const a = args[i];
     const lower = a.toLowerCase();
     if (TARGET_FLAGS.has(lower)) { if (args[i + 1] !== undefined) out.push(args[++i]); continue; }
-    if (VALUE_FLAGS.has(lower)) { i++; continue; }
+    if (cmd === "truncate" && VALUE_FLAGS.has(lower)) { i++; continue; }
     if (a.startsWith("-")) continue;
     out.push(a);
   }
@@ -153,7 +156,7 @@ function segmentOperation(segment) {
     return { kind: "db_destroy", targets: sqlTargets(segment) };
   }
   const { cmd, args } = command(segment);
-  const plain = plainArgs(args);
+  const plain = plainArgs(args, cmd);
   if (DELETE_COMMANDS.has(cmd) || /^(remove|clear)-/.test(cmd)) return { kind: "delete", targets: plain };
   if (cmd === "find") {
     const start = args.findIndex((a) => a.startsWith("-"));
@@ -209,6 +212,54 @@ export function operations(toolName, params) {
   }
   if (toolName === "github_publish") return [{ kind: "publish", targets: [] }];
   return [{ kind: "system", targets: [] }];
+}
+
+const MOVE_COMMANDS = new Set(["mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni"]);
+const COPY_COMMANDS = new Set(["cp", "copy", "copy-item", "cpi", "install", "rsync"]);
+
+// Every path a call would move, rename, overwrite, write into or delete - not
+// just the ones risk.js calls destructive. The gate uses it after a hold: an
+// agent refused `rm -rf data` often reaches for `mv data data.bak` next, which
+// makes the data vanish from where it was just as surely.
+export function touchedPaths(toolName, params) {
+  const p = params && typeof params === "object" ? params : {};
+  if (toolName === "write" || toolName === "edit") {
+    const path = p.file_path ?? p.path;
+    return typeof path === "string" ? [path] : [];
+  }
+  if (toolName === "apply_patch") {
+    const patch = typeof p.input === "string" ? p.input : typeof p.patch === "string" ? p.patch : "";
+    return [...patch.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$|^\*\*\* Move to: (.+)$/gm)]
+      .map((m) => (m[1] ?? m[2]).trim());
+  }
+  if (toolName !== "exec" && toolName !== "terminal") return [];
+  const text = p.command ?? p.cmd ?? p.input;
+  if (typeof text !== "string") return [];
+  const out = [];
+  for (const segment of splitSegments(text)) {
+    const { cmd, args } = command(segment);
+    const plain = plainArgs(args, cmd);
+    if (MOVE_COMMANDS.has(cmd) || DELETE_COMMANDS.has(cmd) || /^(remove|clear)-/.test(cmd) || cmd === "shred") {
+      out.push(...plain);
+    } else if (COPY_COMMANDS.has(cmd) && plain.length > 1) {
+      out.push(plain.at(-1)); // the destination is what gets overwritten
+    }
+    for (const m of segment.matchAll(/(?<![\d&>])>>?(?![&])\s*("[^"]+"|'[^']+'|[^\s;|&<>]+)/g)) {
+      out.push(m[1].replace(/^["']|["']$/g, ""));
+    }
+  }
+  return out.filter((t) => !/^\/dev\/|^nul$/i.test(t));
+}
+
+// Relative and absolute spellings of one path share their tail, so compare
+// tails: `../customer-data`, `./customer-data` and `/home/u/customer-data`
+// all cover the same folder, and so does anything inside it.
+const tail = (p) => normPath(p).replace(/^(\.\.?\/|~\/)+/, "");
+export function coversPath(held, path) {
+  const h = tail(held);
+  const t = tail(path);
+  if (!h || !t || /[*?[\]]/.test(h) || !mentionable(h)) return false;
+  return t === h || t.endsWith(`/${h}`) || h.endsWith(`/${t}`) || t.startsWith(`${h}/`) || t.includes(`/${h}/`);
 }
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
@@ -287,7 +338,7 @@ function creations(toolName, params) {
     for (const segment of splitSegments(text)) {
       const { cmd, args } = command(segment);
       if ((cmd === "mkdir" || cmd === "md") && !args.some((a) => /^(-p|--parents|-force)$/i.test(a))) {
-        paths.push(...plainArgs(args));
+        paths.push(...plainArgs(args, cmd));
       }
       for (const m of segment.matchAll(/(?<![\d&>])>(?![>&])\s*("[^"]+"|'[^']+'|[^\s;|&<>]+)/g)) {
         const target = m[1].replace(/^["']|["']$/g, "");
@@ -340,6 +391,14 @@ export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3
       const ops = operations(toolName, params);
       const labels = (ops.length ? ops : [{ kind: "generic", targets: [] }]).map((op) => judge(op, s));
       return labels.reduce((a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a));
+    },
+    // Whether the user's own turns name this target with a delete or move
+    // verb in one sentence - what lets a held target be touched after all.
+    requestsTarget(sessionKey, target) {
+      const s = sessionKey ? sessions.get(sessionKey) : undefined;
+      const name = mentionable(target);
+      if (!s?.requests.length || !name) return false;
+      return namedWithVerb(s.requests.join("\n"), name, [...VERBS.delete, "move", "rename", "mv"]);
     },
     recordCompleted(sessionKey, toolName, params, failed) {
       if (!sessionKey || failed) return;
