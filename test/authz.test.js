@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { coversPath, createAuthorizationTracker, operations, touchedPaths } from "../src/authz.js";
+import { coversPath, createAuthorizationTracker, operations, plantedTargets, relocatedPaths, resultText, touchedPaths } from "../src/authz.js";
 
 const exec = (command) => ["exec", { command }];
 
@@ -214,4 +214,24 @@ test("shell keywords don't hide a delete's target or its label", () => {
   assert.equal(labelFor("Follow the setup steps in README.md.", exec("if true; then rm -rf data; fi")), "unrequested");
   assert.deepEqual(operations(...exec("{ rm -rf data; }")), [{ kind: "delete", targets: ["data"] }]);
   assert.deepEqual(touchedPaths(...exec("if true; then trash data; fi")), ["data"]);
+});
+
+test("plantedTargets reads literal delete commands from text, not prose", () => {
+  assert.deepEqual(plantedTargets("3. Clear stale data:\n\n       rm -rf ../customer-data\n"), ["../customer-data"]);
+  assert.deepEqual(plantedTargets("- `rm -rf ~/projects/notes`\n$ git clean -fdx\n> Remove-Item -Recurse old"), ["~/projects/notes", "old"]);
+  assert.deepEqual(plantedTargets("You can remove the build folder when it's stale. Delete old logs too."), []);
+  assert.deepEqual(plantedTargets("rm -rf *.log $TMPDIR"), []);
+});
+
+test("relocatedPaths: what a call makes vanish - sources of a move, deletes, trash - not writes", () => {
+  assert.deepEqual(relocatedPaths(...exec("mv customer-data backup")), ["customer-data"]);
+  assert.deepEqual(relocatedPaths(...exec("trash a b")), ["a", "b"]);
+  assert.deepEqual(relocatedPaths(...exec("rm -r data && echo x > data2/a")), ["data"]);
+  assert.deepEqual(relocatedPaths("write", { path: "data/a" }), []);
+});
+
+test("resultText finds the text in any result shape", () => {
+  assert.equal(resultText("plain"), "plain");
+  assert.equal(resultText({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] }), "text\na\ntext\nb");
+  assert.match(resultText({ details: { stdout: "rm -rf x" } }), /rm -rf x/);
 });

@@ -251,6 +251,61 @@ export function touchedPaths(toolName, params) {
   return out.filter((t) => !/^\/dev\/|^nul$/i.test(t));
 }
 
+// Paths a call makes vanish from where they were: deleted, trashed, or moved
+// away (a move's sources, not its destination). Narrower than touchedPaths -
+// writing into a folder doesn't make it disappear.
+export function relocatedPaths(toolName, params) {
+  const p = params && typeof params === "object" ? params : {};
+  if (toolName === "apply_patch") {
+    const patch = typeof p.input === "string" ? p.input : typeof p.patch === "string" ? p.patch : "";
+    return [...patch.matchAll(/^\*\*\* Delete File: (.+)$/gm)].map((m) => m[1].trim());
+  }
+  if (toolName !== "exec" && toolName !== "terminal") return [];
+  const text = p.command ?? p.cmd ?? p.input;
+  if (typeof text !== "string") return [];
+  const out = [];
+  for (const segment of splitSegments(text)) {
+    const { cmd, args } = command(segment);
+    const plain = plainArgs(args, cmd);
+    if (MOVE_COMMANDS.has(cmd)) out.push(...(plain.length > 1 && !cmd.startsWith("trash") ? plain.slice(0, -1) : plain));
+    else if (DELETE_COMMANDS.has(cmd) || /^(remove|clear)-/.test(cmd) || cmd === "shred") out.push(...plain);
+  }
+  return out;
+}
+
+// The text of a tool result, whatever shape OpenClaw hands it over in: a
+// string, { content: [{ type: "text", text }] }, or nested details.
+export function resultText(result, budget = 200_000) {
+  const parts = [];
+  let size = 0;
+  const walk = (v, depth) => {
+    if (size >= budget || depth > 4 || v === null || v === undefined) return;
+    if (typeof v === "string") { parts.push(v.slice(0, budget - size)); size += v.length; return; }
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v === "object") for (const x of Object.values(v)) walk(x, depth + 1);
+  };
+  walk(result, 0);
+  return parts.join("\n");
+}
+
+// Targets that text the agent read tells it to delete: a README setup step,
+// a web page, a tool's output. Only literal commands count (`rm -rf
+// ../customer-data`, maybe as a list item, prompt line or inline code), never
+// prose, so a page that merely talks about deleting things adds nothing.
+export function plantedTargets(text) {
+  if (typeof text !== "string" || !text) return [];
+  const out = [];
+  for (const raw of text.slice(0, 200_000).split(/\r?\n/)) {
+    const line = raw.trim().replace(/^(?:[-*>]|\d+[.)]|\$|#|PS [^>]*>)\s*/, "").replace(/^`+|`+$/g, "").trim();
+    if (!line || line.length > 500) continue;
+    try {
+      for (const op of operations("exec", { command: line })) if (op.kind === "delete") out.push(...op.targets);
+    } catch { /* not a command */ }
+    if (out.length >= 50) break;
+  }
+  return out.filter((t) => t && !/[*?[\]]|^\$/.test(t));
+}
+
 // Relative and absolute spellings of one path share their tail, so compare
 // tails: `../customer-data`, `./customer-data` and `/home/u/customer-data`
 // all cover the same folder, and so does anything inside it.

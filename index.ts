@@ -138,6 +138,9 @@ export default {
     // Nothing is returned, and OpenClaw runs after_tool_call fire-and-forget,
     // so the agent never waits on the supervisor.
     api.on("after_tool_call", (event: any, ctx: any) => {
+      // What the agent just read: a delete command in it (a README step, a web
+      // page) can't authorize itself, so its target is held (src/control.js).
+      try { gate.noteToolResult(event, ctx); } catch { /* the gate still judges every call */ }
       try { outcomes?.noteToolCall(runKeyOf(event, ctx), event?.toolName, Boolean(event?.error)); } catch { /* best-effort */ }
       void supervisor.recordToolCall(runKeyOf(event, ctx), {
         toolName: event.toolName,
