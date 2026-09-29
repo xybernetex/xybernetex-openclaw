@@ -108,6 +108,11 @@ asked for. It is a heuristic, not a sandbox, and you should know its edges:
   patch contents and action verbs. A command hidden inside a script the agent
   runs (`python cleanup.py`) is judged as running a script, not as the deletes
   inside it. Tools it doesn't know how to judge are never matched by its rules.
+- **A delete it was told about is held in any form.** When something the agent
+  reads (a README step, a web page, tool output) contains a delete command, that
+  target is held against being deleted, moved, renamed or trashed, unless the
+  user asks. Only literal commands are recognized: "please remove the data
+  folder" in prose isn't, though an actual delete of it is still held.
 - **"Requested" is read from the user's own message.** The action and its
   target have to appear together, and only the user's turns count, never files,
   web pages or tool output. Phrasing can still fool it in either direction, and
