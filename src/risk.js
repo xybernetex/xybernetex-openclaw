@@ -72,10 +72,14 @@ const HTTP_WRITE = /(^|\s)(-X|--request|-Method)\s*['"]?(POST|PUT|PATCH|DELETE)\
 export const SQL_CLIENT = /(^|[\s;&|(])(psql|pgcli|mysql|mariadb|sqlite3?|litecli|sqlcmd|invoke-sqlcmd|duckdb|clickhouse(-client)?|bq|snowsql|cockroach)(\.exe)?(\s|$)/i;
 export const SQL_DESTRUCTIVE = /\b(drop\s+(table|database|schema|index|view|user)|truncate\s+(table\s+)?\w|delete\s+from)\b/i;
 
-// Prefixes that run the next word as the real command.
+// Prefixes that run the next word as the real command. Shell keywords too:
+// the 2026-09-29 demo agent deleted with `if ...; then trash build; else rm
+// -rf build; fi`, and `else rm` read as a command named "else" - so
+// `if true; then rm -rf data; fi` went through the gate unclassified.
+export const SHELL_KEYWORDS = Object.freeze(["if", "then", "else", "elif", "do", "while", "until", "!", "{"]);
 const WRAPPERS = new Set([
   "sudo", "doas", "env", "nohup", "time", "xargs", "exec", "call", "start", "start-process", "&", ".",
-  "npx", "pnpx", "bunx", "uvx",
+  "npx", "pnpx", "bunx", "uvx", ...SHELL_KEYWORDS,
 ]);
 
 function stripQuoted(command) {

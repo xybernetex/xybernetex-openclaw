@@ -27,7 +27,7 @@
 // instruction could create a file and then delete it - so it is a feature for
 // the policy, never grounds to skip an enforcement rule. Like risk.js this is
 // a heuristic, not a security boundary.
-import { classifyShellCommand, classifyToolCall, SQL_CLIENT, SQL_DESTRUCTIVE } from "./risk.js";
+import { classifyShellCommand, classifyToolCall, SHELL_KEYWORDS, SQL_CLIENT, SQL_DESTRUCTIVE } from "./risk.js";
 
 export const AUTHORIZATION_LABELS = Object.freeze(["requested", "own_artifact", "unrequested"]);
 
@@ -66,7 +66,7 @@ const NEEDS_TARGET = new Set(["delete", "db_destroy"]);
 const SEVERITY = { requested: 0, own_artifact: 1, unrequested: 2 };
 
 const WRAPPERS = new Set(["sudo", "doas", "env", "nohup", "time", "xargs", "exec", "call", "start", "&", ".",
-  "npx", "pnpx", "bunx", "uvx"]);
+  "npx", "pnpx", "bunx", "uvx", ...SHELL_KEYWORDS]);
 const DELETE_COMMANDS = new Set(["rm", "rmdir", "rd", "del", "erase", "unlink", "shred", "rimraf", "ri",
   "truncate"]);
 const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun", "cargo", "gem", "twine"]);
@@ -214,7 +214,7 @@ export function operations(toolName, params) {
   return [{ kind: "system", targets: [] }];
 }
 
-const MOVE_COMMANDS = new Set(["mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni"]);
+const MOVE_COMMANDS = new Set(["mv", "move", "move-item", "mi", "ren", "rename", "rename-item", "rni", "trash", "trash-put"]);
 const COPY_COMMANDS = new Set(["cp", "copy", "copy-item", "cpi", "install", "rsync"]);
 
 // Every path a call would move, rename, overwrite, write into or delete - not

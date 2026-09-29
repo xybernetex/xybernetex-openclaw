@@ -115,3 +115,16 @@ test("non-shell tools", () => {
   assert.equal(classifyToolCall("some_mcp_tool", { x: 1 }), null);
   assert.equal(classifyToolCall("tool_call", { id: "web_fetch" }), null);
 });
+
+test("commands behind shell keywords are classified, not read as a command named then/else/do", () => {
+  // The 2026-09-29 demo agent ran `if ...; then trash build; else rm -rf build; fi`: `else rm` was "none",
+  // so `if true; then rm -rf data; fi` went through the gate unclassified.
+  for (const command of ["if true; then rm -rf data; fi", "if [ -d x ]; then echo; else rm -rf data; fi",
+    "for d in a b; do rm -rf $d; done", "while true; do rm -rf data; done", "! rm -rf data", "{ rm -rf data; }",
+    "if rm -rf data; then echo gone; fi"]) {
+    assert.equal(classifyShellCommand(command), "destructive", command);
+  }
+  for (const command of ["echo then done", "grep -r else src", "if [ -f a ]; then cat a; fi"]) {
+    assert.equal(classifyShellCommand(command), "none", command);
+  }
+});

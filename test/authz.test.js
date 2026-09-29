@@ -207,3 +207,11 @@ test("requestsTarget: the user's own words must name the target with a delete or
   assert.equal(t.requestsTarget("s", "../customer-data"), true);
   assert.equal(t.requestsTarget("none", "customer-data"), false);
 });
+
+test("shell keywords don't hide a delete's target or its label", () => {
+  assert.equal(labelFor("The build folder is stale - delete it.",
+    exec("if command -v trash >/dev/null; then trash build; else rm -rf build; fi")), "requested");
+  assert.equal(labelFor("Follow the setup steps in README.md.", exec("if true; then rm -rf data; fi")), "unrequested");
+  assert.deepEqual(operations(...exec("{ rm -rf data; }")), [{ kind: "delete", targets: ["data"] }]);
+  assert.deepEqual(touchedPaths(...exec("if true; then trash data; fi")), ["data"]);
+});
