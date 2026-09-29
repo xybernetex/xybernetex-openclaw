@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.2
+
+- **The agent can clean up its own files.** A plain delete (`rm`, `unlink`,
+  `del`, `Remove-Item`; no recursion) of single files the agent itself created
+  in the session - written, added by a patch or redirected to - now runs
+  without a prompt, even after a `cd` or followed by `ls`/`cat`. Before, every
+  such cleanup was held, and in runs no one can approve from (CLI, cron) the
+  agent's temp scripts were left behind. Folders it made are still held:
+  `mv data.csv scratch/ && rm -rf scratch` would otherwise delete your file.
+  Tool caches (`__pycache__`, `.pyc`) may go unless a move named them. Any
+  visible move onto a file drops it from the agent's own. Rules opt in with
+  `unlessAuthorization: ["requested", "own_files"]`; both presets do.
+- **Held-out runs keep their probability.** When the follow-up rule leaves a
+  run untreated on purpose (the 10% comparison group), its outcome episode now
+  records that probability (0.1) instead of 1, so weighted estimates of what
+  follow-ups gain no longer undercount the comparison group.
+
 ## 0.4.1
 
 - **Cut-off answers are recognized as deaths.** When the model's final turn

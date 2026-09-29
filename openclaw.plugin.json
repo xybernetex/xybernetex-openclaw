@@ -72,8 +72,8 @@
                   "description": "Match only calls src/risk.js classifies at or above this tier (e.g. any destructive exec command, not just one exact command). Combines with paramsMatch (both must hold) when both are set. A tool risk.js doesn't know how to judge never matches, even in enforce mode - it is skipped, not treated as low risk."
                 },
                 "unlessAuthorization": {
-                  "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["requested"] },
-                  "description": "Skip this rule for calls src/authz.js labels as requested by the user's own turn (verb and target in one sentence). Only \"requested\" is allowed - never own_artifact. Unlabeled calls still match. Every skipped call is logged as tool_gate_waived. Omit to apply the rule regardless."
+                  "type": "array", "uniqueItems": true, "items": { "type": "string", "enum": ["requested", "own_files"] },
+                  "description": "Skip this rule for calls src/authz.js labels as requested by the user's own turn (verb and target in one sentence), and/or (\"own_files\") for plain deletes of single files the agent itself created this session that nothing has moved onto since. own_artifact on its own never waives. Unlabeled calls still match. Every skipped call is logged as tool_gate_waived. Omit to apply the rule regardless."
                 }
               }
             }

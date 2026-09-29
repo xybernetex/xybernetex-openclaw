@@ -35,10 +35,13 @@ const ANY = "*";
 // not a meaningful threshold to configure - only the two elevated tiers are.
 const RISK_THRESHOLDS = RISK_LEVELS.filter((level) => level !== "none");
 
-// Labels that may waive a rule. Deliberately just "requested": own_artifact
-// can be staged within a session (create, then delete), so it must never
-// relax enforcement, and unrequested/unassessed obviously can't.
-const WAIVING_LABELS = Object.freeze(["requested"]);
+// What may waive a rule. "requested": the user's own turn asked for it.
+// "own_files": an own_artifact call that only deletes single files the agent
+// created this session and nothing has moved onto since (authz ownsFiles).
+// own_artifact alone never waives: a folder can be staged within a session
+// (mkdir scratch, mv data.csv scratch/, rm -rf scratch). unrequested and
+// unassessed obviously can't.
+const WAIVING_LABELS = Object.freeze(["requested", "own_files"]);
 
 // authorize(event, ctx) supplies src/authz.js's label for the call. It is
 // logged on every gate event, and a rule's optional unlessAuthorization
@@ -47,8 +50,10 @@ const WAIVING_LABELS = Object.freeze(["requested"]);
 // preset (src/presets.js) prepends a named rule set to the operator's rules.
 // requestsTarget(ctx, target) says whether the user's own turns ask for that
 // target to be deleted or moved (src/authz.js), which lifts a held target.
+// ownsFiles(event, ctx) says whether an own_artifact call only deletes the
+// agent's own single files (src/authz.js), for rules listing "own_files".
 export function createToolGate({ mode = "observe", preset, rules = [], log = () => {}, authorize = () => null,
-  requestsTarget = () => false, maxSessions = 200 } = {}) {
+  requestsTarget = () => false, ownsFiles = () => false, maxSessions = 200 } = {}) {
   if (!["observe", "enforce"].includes(mode)) throw new Error("control.mode must be observe or enforce");
   if (!Array.isArray(rules)) throw new Error("control.rules must be an array");
   const ids = new Set();
@@ -175,7 +180,12 @@ export function createToolGate({ mode = "observe", preset, rules = [], log = () 
     if (!candidates.length) return;
     let authorization = null;
     try { authorization = authorize(event, ctx) ?? null; } catch { /* unlabeled: no waiver */ }
-    const matches = candidates.filter((r) => !r.unlessAuthorization.includes(authorization));
+    let ownFiles = false;
+    if (authorization === "own_artifact" && candidates.some((r) => r.unlessAuthorization.includes("own_files"))) {
+      try { ownFiles = ownsFiles(event, ctx) === true; } catch { /* unproven: no waiver */ }
+    }
+    const matches = candidates.filter((r) => !r.unlessAuthorization.includes(authorization) &&
+      !(ownFiles && r.unlessAuthorization.includes("own_files")));
     const base = { mode, enforced: mode === "enforce",
       runKey: event.runId ?? ctx?.runId ?? ctx?.sessionKey ?? "unknown",
       sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
@@ -188,7 +198,7 @@ export function createToolGate({ mode = "observe", preset, rules = [], log = () 
       // Logged so what ran unprompted can always be reviewed.
       try {
         log({ ...base, type: "tool_gate_waived", gateId: randomUUID(), riskTier,
-          ruleIds: candidates.map((r) => r.id) });
+          ruleIds: candidates.map((r) => r.id), ...(ownFiles ? { waiver: "own_files" } : {}) });
       } catch { /* the call is permitted either way */ }
       return;
     }

@@ -25,8 +25,24 @@
 //
 // "own_artifact" is weaker evidence than "requested" - a same-session
 // instruction could create a file and then delete it - so it is a feature for
-// the policy, never grounds to skip an enforcement rule. Like risk.js this is
-// a heuristic, not a security boundary.
+// the policy, never on its own grounds to skip an enforcement rule. Like
+// risk.js this is a heuristic, not a security boundary.
+//
+// ownsFiles() is the narrow case that may waive one (a rule lists
+// "own_files" in unlessAuthorization): a plain delete (rm, unlink, del,
+// Remove-Item) of single files the agent itself created this session -
+// written, added by a patch, redirected to with > - that no move has touched
+// since, optionally after a cd and followed by read-only commands (ls, cat).
+// Deleting such a file loses only the agent's own content: whatever it
+// replaced was already gone when the agent wrote it. Paths are resolved
+// against the call's workdir and any cd, and must match exactly - a file made
+// at tmp/data.csv never covers data.csv. Folders never qualify: `mv data.csv
+// scratch/ && rm -rf scratch` would launder a user's file through a folder the
+// agent made. The one exception is a tool cache (__pycache__, *.pyc), which
+// regenerates itself, and only while no move this session has named a folder
+// or file by that name. Any visible move that could land on a tracked file
+// (same path, a folder above it, the same file name, or sources we can't
+// read) drops it from the set.
 import { classifyShellCommand, classifyToolCall, SHELL_KEYWORDS, SQL_CLIENT, SQL_DESTRUCTIVE } from "./risk.js";
 
 export const AUTHORIZATION_LABELS = Object.freeze(["requested", "own_artifact", "unrequested"]);
@@ -60,6 +76,18 @@ const GIT_VERBS = {
 };
 // Tool-generated and regenerated on demand: deleting them loses nothing.
 const REGENERABLE = /^(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.cache|.*\.pyc)$/i;
+// ownsFiles: the only commands, flags and target shapes it accepts.
+const OWN_DELETE_COMMANDS = new Set(["rm", "unlink", "del", "erase", "remove-item", "ri"]);
+const PLAIN_DELETE_FLAG = /^(-f|-v|-fv|-vf|--force|--verbose|-force|\/f|\/q)$/i;
+const RECURSIVE_FLAG = /^(-(?=[rfv]*r)[rfv]+|--recursive|-recurse)$/i;
+const PATH_FLAG = /^-(path|literalpath)$/i;
+const CD_COMMANDS = new Set(["cd", "chdir", "pushd", "set-location", "sl"]);
+const READ_ONLY_COMMANDS = new Set(["ls", "dir", "cat", "echo", "pwd", "head", "tail", "wc", "true", "type",
+  "get-childitem", "gci", "get-content", "gc"]);
+const UNSAFE_TARGET = /[*?[\]{}$`~,]|(^|[/\\])\.\.([/\\]|$)|^-/;
+const ABSOLUTE = /^([/\\]|[a-z]:)/i;
+const UNSAFE_SHELL = /[<>|`]|\$\(/;
+const UNREADABLE_MOVE = /\bxargs\b|\bfind\b.*-exec|\bparallel\b/i;
 // A delete or drop with no target we can read is never "requested" on the
 // strength of a verb alone: "delete the old logs" must not cover `xargs rm`.
 const NEEDS_TARGET = new Set(["delete", "db_destroy"]);
@@ -333,6 +361,38 @@ function mentionable(target) {
 
 const normPath = (p) => String(p).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "").toLowerCase();
 
+// path against a relative working folder, as one normalized relative (or absolute) path.
+function resolvePath(cwd, path) {
+  let p = String(path).replace(/\\/g, "/");
+  if (cwd && !ABSOLUTE.test(p)) p = `${cwd}/${p}`;
+  return (p.startsWith("/") ? "/" : "") + p.split("/").filter((x) => x !== "" && x !== ".").join("/");
+}
+
+// A shell call's commands, each with the folder it runs in: { cwd, cmd, args,
+// segment }. cwd is relative to the agent's workspace ("" = the workspace), or
+// null once a cd (or the call's workdir) goes somewhere we can't follow.
+function shellSteps(p) {
+  const text = p.command ?? p.cmd ?? p.input;
+  if (typeof text !== "string") return null;
+  const wd = p.workdir ?? p.cwd;
+  let cwd = "";
+  if (typeof wd === "string" && wd.trim()) {
+    cwd = !UNSAFE_TARGET.test(wd.trim()) && !ABSOLUTE.test(wd.trim()) ? resolvePath("", wd.trim()) : null;
+  }
+  const steps = [];
+  for (const segment of splitSegments(text)) {
+    const { cmd, args } = command(segment);
+    if (CD_COMMANDS.has(cmd)) {
+      const plain = args.filter((a) => !a.startsWith("-"));
+      const safe = plain.length === 1 && !UNSAFE_TARGET.test(plain[0]) && !ABSOLUTE.test(plain[0]);
+      cwd = cwd !== null && safe ? resolvePath(cwd, plain[0]) : null;
+      continue;
+    }
+    steps.push({ cwd, cmd, args, segment });
+  }
+  return steps;
+}
+
 function owned(created, target) {
   if (/[*?[\]]/.test(target)) return false;
   const t = normPath(target);
@@ -379,27 +439,37 @@ function judge(op, session) {
 // agent's own scratch work. Deliberately excludes idempotent forms that also
 // succeed on something pre-existing (mkdir -p, touch, CREATE TABLE IF NOT
 // EXISTS, git init), which would let an existing target pass as "created".
+// files: the created paths that are single files (everything but mkdir).
+// >> appends are not creations either: the file may be the user's.
 function creations(toolName, params) {
   const p = params && typeof params === "object" ? params : {};
   const paths = [];
   const tables = [];
+  const files = []; // resolved against the call's working folder, for ownsFiles
   if (toolName === "write") {
     const path = p.file_path ?? p.path;
-    if (typeof path === "string") paths.push(path);
+    if (typeof path === "string") {
+      paths.push(path);
+      files.push(resolvePath("", path));
+    }
   } else if (toolName === "apply_patch") {
     const patch = typeof p.input === "string" ? p.input : typeof p.patch === "string" ? p.patch : "";
-    paths.push(...[...patch.matchAll(/^\*\*\* Add File: (.+)$/gm)].map((m) => m[1].trim()));
+    const added = [...patch.matchAll(/^\*\*\* Add File: (.+)$/gm)].map((m) => m[1].trim());
+    paths.push(...added);
+    files.push(...added.map((a) => resolvePath("", a)));
   } else if (toolName === "exec" || toolName === "terminal") {
-    const text = p.command ?? p.cmd ?? p.input;
-    if (typeof text !== "string") return { paths, tables };
-    for (const segment of splitSegments(text)) {
-      const { cmd, args } = command(segment);
+    const steps = shellSteps(p);
+    if (!steps) return { paths, tables, files };
+    for (const { cwd, cmd, args, segment } of steps) {
       if ((cmd === "mkdir" || cmd === "md") && !args.some((a) => /^(-p|--parents|-force)$/i.test(a))) {
         paths.push(...plainArgs(args, cmd));
       }
       for (const m of segment.matchAll(/(?<![\d&>])>(?![>&])\s*("[^"]+"|'[^']+'|[^\s;|&<>]+)/g)) {
         const target = m[1].replace(/^["']|["']$/g, "");
-        if (!/^\/dev\/|^nul$/i.test(target)) paths.push(target);
+        if (!/^\/dev\/|^nul$/i.test(target)) {
+          paths.push(target);
+          if (cwd !== null && !UNSAFE_TARGET.test(target)) files.push(resolvePath(cwd, target));
+        }
       }
       if (SQL_CLIENT.test(segment)) {
         tables.push(...[...segment.matchAll(/\bcreate\s+table\s+(?!if\s+not\s+exists)([\w."`]+)/gi)]
@@ -407,7 +477,27 @@ function creations(toolName, params) {
       }
     }
   }
-  return { paths, tables };
+  return { paths, tables, files };
+}
+
+// The paths a call's visible moves name (sources and destinations, resolved
+// against its working folder), and whether it moved things we can't name
+// (globs, xargs, find -exec, a folder we lost track of).
+function moves(toolName, params) {
+  const p = params && typeof params === "object" ? params : {};
+  const steps = toolName === "exec" || toolName === "terminal" ? shellSteps(p) : null;
+  if (!steps) return { named: [], unreadable: false };
+  const named = [];
+  let unreadable = false;
+  for (const { cwd, cmd, args, segment } of steps) {
+    if (!(MOVE_COMMANDS.has(cmd) || (cmd === "git" && args[0] === "mv") ||
+          (cmd === "rsync" && args.includes("--remove-source-files")))) continue;
+    const plain = (cmd === "git" ? args.slice(1) : args).filter((a) => !a.startsWith("-"));
+    if (cwd === null || !plain.length || UNREADABLE_MOVE.test(segment) ||
+        plain.some((a) => /[*?[\]]|^\$/.test(a) || UNSAFE_TARGET.test(a))) unreadable = true;
+    named.push(...plain.map((a) => resolvePath(cwd ?? "", a)));
+  }
+  return { named, unreadable };
 }
 
 export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3, maxCreated = 1000 } = {}) {
@@ -416,7 +506,12 @@ export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3
   function state(sessionKey) {
     let s = sessions.get(sessionKey);
     if (s) sessions.delete(sessionKey);
-    else s = { requests: [], requestSeen: false, paths: new Set(), tables: new Set() };
+    else {
+      s = { requests: [], requestSeen: false, paths: new Set(), tables: new Set(),
+        files: new Set(), // single files created, no move since (resolved paths)
+        movedNames: new Set(), // every path component any move has named
+        movesUnreadable: false }; // a move named things we couldn't read
+    }
     sessions.set(sessionKey, s);
     while (sessions.size > maxSessions) sessions.delete(sessions.keys().next().value);
     return s;
@@ -457,13 +552,67 @@ export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3
       if (!s?.requests.length || !name) return false;
       return namedWithVerb(s.requests.join("\n"), name, [...VERBS.delete, "move", "rename", "mv"]);
     },
+    // Whether this call only deletes single files the agent created this
+    // session and no move has touched since, or tool caches no move has
+    // named (see the top of this file).
+    ownsFiles(sessionKey, toolName, params) {
+      const s = sessionKey ? sessions.get(sessionKey) : undefined;
+      if (!s || (toolName !== "exec" && toolName !== "terminal")) return false;
+      const p = params && typeof params === "object" ? params : {};
+      const text = p.command ?? p.cmd ?? p.input;
+      if (typeof text !== "string" || UNSAFE_SHELL.test(text)) return false;
+      let deleted = false;
+      for (const { cwd, cmd, args } of shellSteps(p) ?? []) {
+        if (READ_ONLY_COMMANDS.has(cmd)) continue;
+        if (!OWN_DELETE_COMMANDS.has(cmd) || cwd === null) return false;
+        const targets = [];
+        let recursive = false;
+        for (let i = 0; i < args.length; i++) {
+          const a = args[i];
+          if (PATH_FLAG.test(a) && i + 1 < args.length) { targets.push(args[++i]); continue; }
+          if (RECURSIVE_FLAG.test(a)) recursive = true;
+          else if (a.startsWith("-") || ((cmd === "del" || cmd === "erase") && a.startsWith("/"))) {
+            if (!PLAIN_DELETE_FLAG.test(a)) return false;
+          } else targets.push(a);
+        }
+        if (!targets.length) return false;
+        for (const t of targets) {
+          if (UNSAFE_TARGET.test(t)) return false;
+          const path = normPath(resolvePath(cwd, t));
+          const name = path.split("/").at(-1);
+          const cache = REGENERABLE.test(name) && !s.movesUnreadable && !s.movedNames.has(name);
+          if (!cache && (recursive || !s.files.has(path))) return false;
+        }
+        deleted = true;
+      }
+      return deleted;
+    },
     recordCompleted(sessionKey, toolName, params, failed) {
-      if (!sessionKey || failed) return;
-      const { paths, tables } = creations(toolName, params);
+      if (!sessionKey) return;
+      // A move - even a failed one, which may have moved part of its sources -
+      // can land something else on a file the agent created, or inside a cache.
+      const { named, unreadable } = moves(toolName, params);
+      if (named.length || unreadable) {
+        const s = state(sessionKey);
+        const hit = new Set(named.map(normPath));
+        if (unreadable) {
+          s.files.clear();
+          s.movesUnreadable = true;
+        } else {
+          const names = new Set([...hit].map((h) => h.split("/").at(-1)));
+          for (const f of [...s.files]) {
+            if (hit.has(f) || [...hit].some((h) => f.startsWith(`${h}/`)) || names.has(f.split("/").at(-1))) s.files.delete(f);
+          }
+        }
+        bounded(s.movedNames, [...hit].flatMap((h) => h.split("/").filter(Boolean)));
+      }
+      if (failed) return;
+      const { paths, tables, files } = creations(toolName, params);
       if (!paths.length && !tables.length) return;
       const s = state(sessionKey);
       bounded(s.paths, paths);
       bounded(s.tables, tables);
+      bounded(s.files, files);
     },
     endSession(sessionKey) {
       sessions.delete(sessionKey);

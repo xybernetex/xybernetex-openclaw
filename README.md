@@ -120,8 +120,13 @@ asked for. It is a heuristic, not a sandbox, and you should know its edges:
   folder" in prose isn't, though an actual delete of it is still held.
 - **"Requested" is read from the user's own message.** The action and its
   target have to appear together, and only the user's turns count, never files,
-  web pages or tool output. Phrasing can still fool it in either direction, and
-  `own_artifact` (cleaning up the agent's own files) never waives a rule.
+  web pages or tool output. Phrasing can still fool it in either direction.
+- **The agent may delete its own files, not its own folders.** A plain delete
+  (`rm`, `del`, `Remove-Item`, no recursion) of files the agent itself created
+  in the session, with nothing moved onto them since, runs without a prompt.
+  Deleting a folder it made is still held: moving your file into it first
+  would otherwise get it deleted. Tool caches (`__pycache__`, `.pyc`) are the
+  one folder exception.
 - **Where OpenClaw doesn't report where a turn came from,** every turn in the
   session is treated as the user's. OpenClaw 2026.9.6 doesn't report it on the
   gateway path.

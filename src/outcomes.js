@@ -185,9 +185,12 @@ export function createOutcomeTracker({ log = () => {}, send = null, quietMs = 30
       const ep = {
         runKey: entry.runKey, agentId: entry.agentId ?? null, model: asLabel(entry.model), mode: entry.mode,
         action: entry.action, applied, rule: asLabel(entry.rule), policy: asLabel(entry.policy),
-        // The chance of what was actually applied: a decision observe mode (or a
-        // failed start) didn't carry out left the run untreated for certain.
-        probability: entry.scheduled ? entry.probability : 1,
+        // The chance of what was actually applied. In act mode that's the
+        // decision's own probability - including a "none" the rule held out,
+        // which is what makes untreated runs comparable (0.4.1 recorded 1 for
+        // those). A decision nobody carried out (observe mode, a follow-up
+        // that couldn't start) left the run untreated for certain.
+        probability: entry.mode === "act" && applied === entry.action ? entry.probability : 1,
         success: summary.success === true, retriable: summary.retriable === true, toolCalls: summary.toolCalls ?? 0,
         lastEnd: now(), followupRunKey: null, followupEnded: false, followupSuccess: null, timer: null,
       };

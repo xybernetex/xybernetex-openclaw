@@ -35,6 +35,13 @@ non-interactive-CLI caveat above: this only reviews meaningfully in an
 interactive session (`main` is used that way); the same rule under a one-shot
 CLI call fails closed with no prompt to answer.
 
+**Since 2026-09-30 the presets also list `"own_files"`**: a plain delete of
+single files the agent created this session, with no visible move onto them
+since, is waived (src/authz.js `ownsFiles`; folders never, except tool
+caches). Replayed on the 198 experiment runs: 21 of the 27 own_artifact calls
+qualify, identical in the Python port; `mv data.csv scratch/ && rm -rf scratch`
+and `echo x > data.csv; mv ../data.csv .; rm data.csv` do not.
+
 **Since 2026-09-28 each of those rules also sets `unlessAuthorization:
 ["requested"]`**: a destructive call the user's own message asked for (verb
 and target in one sentence of their turn - see "Authorization labels" below)

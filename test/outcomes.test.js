@@ -168,3 +168,18 @@ test("the plugin logs an episode end to end, and sends nothing without an endpoi
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a held-out run keeps its propensity; a decision nobody carried out is untreated for certain", () => {
+  const c = clock();
+  const logged = [];
+  const t = createOutcomeTracker({ log: (e) => logged.push(e), ...c });
+  const run = { success: true, retriable: false, toolCalls: 2 };
+  t.open(decision({ sessionKey: "a", action: "none", probability: 0.1, rule: "verify-held-out", scheduled: false }), run);
+  t.open(decision({ sessionKey: "b", mode: "observe", scheduled: false }), run);
+  t.open(decision({ sessionKey: "c", mode: "observe", action: "none", probability: 0.1, scheduled: false }), run);
+  t.open(decision({ sessionKey: "d", scheduled: false }), run); // act mode, but the turn couldn't start
+  t.open(decision({ sessionKey: "e" }), run);
+  for (const key of ["a", "b", "c", "d", "e"]) t.endSession(key);
+  assert.deepEqual(logged.map((e) => [e.sessionKey, e.applied, e.probability]),
+    [["a", "none", 0.1], ["b", "none", 1], ["c", "none", 1], ["d", "none", 1], ["e", "verify", 0.9]]);
+});

@@ -63,7 +63,8 @@ export default {
     // No endpoint failure can disable configured restrictions.
     const gate = createToolGate({ ...config.control, log: writeLog,
       authorize: (event: any, ctx: any) => authz.label(ctx?.sessionKey, event?.toolName, event?.params),
-      requestsTarget: (ctx: any, target: string) => authz.requestsTarget(ctx?.sessionKey, target) });
+      requestsTarget: (ctx: any, target: string) => authz.requestsTarget(ctx?.sessionKey, target),
+      ownsFiles: (event: any, ctx: any) => authz.ownsFiles(ctx?.sessionKey, event?.toolName, event?.params) });
 
     // Follow-up turns (src/interventions.js): a detached `openclaw agent`
     // turn in the same session, on the same model. Off unless configured.
