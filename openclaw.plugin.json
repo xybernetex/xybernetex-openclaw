@@ -1,7 +1,7 @@
 {
   "id": "xybernetex-openclaw",
-  "name": "Xybernetex Supervisor for OpenClaw",
-  "description": "Agent control plane: authorization-aware safety gate, retry and check-your-work follow-ups, and outcome measurement.",
+  "name": "Xybernetex Safety Gate",
+  "description": "Holds destructive actions nobody asked for. Instructions planted in files or web pages can't authorize themselves, and your own requests run without a prompt.",
   "categories": ["security"],
   "activation": { "onStartup": true },
   "configSchema": {

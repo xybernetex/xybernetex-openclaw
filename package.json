@@ -1,7 +1,7 @@
 {
   "name": "xybernetex-openclaw",
   "version": "0.4.0",
-  "description": "Xybernetex control plane for OpenClaw: authorization-aware safety gate, retry and check-your-work follow-ups, outcome measurement and customer report.",
+  "description": "Xybernetex Safety Gate for OpenClaw: holds destructive actions nobody asked for, so planted instructions can't authorize themselves and your own requests run without a prompt. Plus check-your-work and retry follow-ups, and a report.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",
   "homepage": "https://xybernetex.com",

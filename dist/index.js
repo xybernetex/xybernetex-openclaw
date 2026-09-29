@@ -38,8 +38,9 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
 
 export default {
   id: "xybernetex-openclaw",
-  name: "Xybernetex Supervisor for OpenClaw",
-  description: "Agent supervisor with observation and opt-in local tool restrictions.",
+  name: "Xybernetex Safety Gate",
+  description: "Holds destructive actions nobody asked for. Instructions planted in files or web pages can't authorize " +
+    "themselves, and your own requests run without a prompt.",
   register(api     ) {
     const config = (api.pluginConfig ?? {})          ;
     const logPath = config.logPath ?? DEFAULT_LOG_PATH;
