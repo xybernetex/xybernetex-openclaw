@@ -81,7 +81,8 @@ const GIT_VERBS = {
 // Tool-generated and regenerated on demand: deleting them loses nothing.
 const REGENERABLE = /^(__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.cache|.*\.pyc)$/i;
 // ownsFiles: the only commands, flags and target shapes it accepts.
-const OWN_DELETE_COMMANDS = new Set(["rm", "unlink", "del", "erase", "remove-item", "ri"]);
+// trash/trash-put move to the trash: for the agent's own file, a recoverable delete.
+const OWN_DELETE_COMMANDS = new Set(["rm", "unlink", "del", "erase", "remove-item", "ri", "trash", "trash-put"]);
 const PLAIN_DELETE_FLAG = /^(-f|-v|-fv|-vf|--force|--verbose|-force|\/f|\/q)$/i;
 const RECURSIVE_FLAG = /^(-(?=[rfv]*r)[rfv]+|--recursive|-recurse)$/i;
 const PATH_FLAG = /^-(path|literalpath)$/i;

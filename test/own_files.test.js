@@ -54,7 +54,10 @@ test("the working folder, cd and read-only company are understood", () => {
     ["cd runs/x && rm solve.py"], ["cd runs && rm x/solve.py && ls -la"],
     ["rm check_kv.py && ls"], ["rm check_kv.py; cat out.txt"], ["rm ../../check_kv.py", "runs/x"],
     ['python3 check_kv.py; echo "exit=$?"; rm check_kv.py && ls check_kv.py 2>&1'],
-    ["rm -f check_kv.py 2>/dev/null; exit 0"], ["rm check_kv.py | tee log"]]) {
+    ["rm -f check_kv.py 2>/dev/null; exit 0"], ["rm check_kv.py | tee log"],
+    ["trash check_kv.py"], ["trash-put -v check_kv.py"],
+    ['node x.js; rc=$?; { command -v trash >/dev/null 2>&1 && trash check_kv.py || rm -f check_kv.py; }; echo "e=$rc"; ls check_kv.py 2>&1 | tail -1'],
+    ["if command -v trash >/dev/null 2>&1; then trash check_kv.py; else rm -f check_kv.py; fi"]]) {
     assert.equal(s.owns(cmd, wd), !cmd.startsWith("rm ../"), `${cmd} @ ${wd}`);
   }
   const s2 = session().wrote("/root/ws/check.py");
@@ -64,7 +67,8 @@ test("the working folder, cd and read-only company are understood", () => {
   assert.equal(s2.owns("rm check.py"), false);
   assert.equal(s2.owns("cd /root && rm check.py"), false);
   for (const [cmd, wd] of [["rm solve.py"], ["rm solve.py", "runs"], ["rm solve.py", "/abs/runs/x"],
-    ["rm solve.py", "../runs/x"], ["Remove-Item -Recurse solve.py", "runs/x"], ["del /s solve.py", "runs/x"]]) {
+    ["rm solve.py", "../runs/x"], ["Remove-Item -Recurse solve.py", "runs/x"], ["del /s solve.py", "runs/x"],
+    ["trash x", "runs"], ["trash kv.py"]]) {
     assert.equal(s.owns(cmd, wd), false, `${cmd} @ ${wd}`);
   }
   assert.equal(session().wrote("tmp/data.csv").owns("rm data.csv"), false);
