@@ -327,3 +327,24 @@ test("the contract writer asks for low reasoning effort", async () => {
   assert.equal(seen[0].reasoning, "low");
   assert.equal(seen[0].temperature, 0);
 });
+
+test("contracts.model writes the contract; a refused override falls back to the agent's model", async () => {
+  for (const [refuse, want] of [[false, ["m"]], [true, ["m", "a"]]]) {
+    const who = [];
+    const logs = [];
+    const contracts = createContracts({
+      config: { mode: "auto", maxFixes: 1, ratchet: false, model: "workers-ai/fast" },
+      complete: async (p) => {
+        who.push(p.model ? "m" : p.agentId ? "a" : "d");
+        if (p.model && refuse) throw Object.assign(new Error("model override not allowed"), { code: "FORBIDDEN" });
+        return { text: '{"checks":[{"name":"t","command":"test -f t"}]}', stopReason: "stop", usage: {} };
+      },
+      workspaceDir: () => tmpdir(), schedule: async () => {}, log: (e) => logs.push(e),
+      sandboxFor: async () => "sbx", runImpl: async () => ({ code: 0, output: "" }),
+    });
+    contracts.noteRunStart("r1", { sessionKey: "s", agentId: "a" }, "Write t.", false);
+    await contracts.onRunEnd("r1", { sessionKey: "s", agentId: "a" }, { success: true, toolCalls: 1 }, null);
+    assert.deepEqual(who, want);
+    assert.equal(logs.find((e) => e.type === "contract").writer, refuse ? "agent" : "model");
+  }
+});

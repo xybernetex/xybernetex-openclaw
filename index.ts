@@ -28,7 +28,7 @@ type Config = {
   interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number; policy?: "remote" | "v0";
     shareOutcomes?: boolean; quietMinutes?: number };
   contracts?: { mode?: "off" | "auto"; agentIds?: string[]; maxFixes?: number; ratchet?: boolean; maxSnapshotMb?: number;
-    noProgressRounds?: number };
+    noProgressRounds?: number; model?: string };
   governor?: "standard" | { maxToolCalls?: number; maxSeconds?: number; repeatLimit?: number };
   control?: {
     mode?: "observe" | "enforce";

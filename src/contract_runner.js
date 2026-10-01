@@ -103,6 +103,8 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   const maxFixes = config.maxFixes ?? 2;
   if (!Number.isInteger(maxFixes) || maxFixes < 0 || maxFixes > 5) throw new Error("contracts.maxFixes must be 0-5");
   const ratchet = config.ratchet !== false;
+  // A model to write contracts with instead of the run's own (e.g. one that doesn't deliberate at length).
+  const writerModel = typeof config.model === "string" && config.model.trim() ? config.model.trim() : null;
   // Fix rounds in a row without improvement before the loop gives up (the governor's no-progress stop).
   const noProgressRounds = config.noProgressRounds ?? 2;
   if (!Number.isInteger(noProgressRounds) || noProgressRounds < 1) throw new Error("contracts.noProgressRounds must be 1 or more");
@@ -119,35 +121,45 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   // try with more room.
   const WRITER_BUDGETS = [8000, 32000];
 
+  // Who writes the contract, in order: contracts.model if set (needs plugins.entries.<id>.llm.allowModelOverride),
+  // the run's agent's model (needs llm.allowAgentIdOverride for a non-default agent), the default agent's model.
+  // A refused or failed call moves on to the next; a reply cut off at the limit retries with more room.
   async function write(prompt, agentId) {
-    let writer = agentId ? "agent" : "default";
+    const writers = [
+      ...(writerModel ? [["model", { model: writerModel }]] : []),
+      ...(agentId ? [["agent", { agentId }]] : []),
+      ["default", {}],
+    ];
     let last = null;
-    for (const maxTokens of WRITER_BUDGETS) {
-      const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
-        purpose: "xybernetex.contract", maxTokens, temperature: 0, reasoning: "low" };
-      let result;
-      try {
-        result = await complete({ ...params, ...(writer === "agent" ? { agentId } : {}) });
-      } catch (err) {
-        if (writer !== "agent") return { contract: null, error: `${err?.code ?? "error"}: ${String(err?.message ?? err).slice(0, 120)}` };
-        // Writing with another agent's model needs plugins.entries.<id>.llm.allowAgentIdOverride; the default
-        // agent's model will do.
-        writer = "default";
-        try { result = await complete(params); } catch (err2) {
-          return { contract: null, error: `${err2?.code ?? "error"}: ${String(err2?.message ?? err2).slice(0, 120)}` };
+    let tokens = 0;
+    for (const [writer, who] of writers) {
+      let refused = false;
+      for (const maxTokens of WRITER_BUDGETS) {
+        const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
+          purpose: "xybernetex.contract", maxTokens, temperature: 0, reasoning: "low", ...who };
+        let result;
+        try {
+          result = await complete(params);
+        } catch (err) {
+          last = { contract: null, writer, error: `${err?.code ?? "error"}: ${String(err?.message ?? err).slice(0, 120)}`,
+            tokens: tokens || null };
+          refused = true;
+          break;
+        }
+        tokens += result?.usage?.totalTokens ?? 0;
+        try {
+          return { contract: parseGenerated(result?.text), writer, tokens: tokens || null };
+        } catch (err) {
+          // Why it couldn't be read - the reply's size and stop reason, never its text.
+          const why = `${String(err?.message ?? err).slice(0, 120)} (reply ${String(result?.text ?? "").length} chars, ` +
+            `stop ${result?.stopReason ?? "unknown"}, budget ${maxTokens})`;
+          last = { contract: null, writer, error: why, tokens: tokens || null };
+          if (!/length|max_tokens/i.test(String(result?.stopReason ?? ""))) return last;
         }
       }
-      const tokens = (last?.tokens ?? 0) + (result?.usage?.totalTokens ?? 0) || null;
-      try {
-        return { contract: parseGenerated(result?.text), writer, tokens };
-      } catch (err) {
-        // Why it couldn't be read - the reply's size and stop reason, never its text.
-        const why = `${String(err?.message ?? err).slice(0, 120)} (reply ${String(result?.text ?? "").length} chars, ` +
-          `stop ${result?.stopReason ?? "unknown"}, budget ${maxTokens})`;
-        last = { contract: null, writer, error: why, tokens };
-        const cutOff = /length|max_tokens/i.test(String(result?.stopReason ?? ""));
-        if (!cutOff) return last;
-      }
+      // Only a refused or failed call moves on to the next writer; a model that answered but couldn't write
+      // a contract is the answer.
+      if (!refused) return last;
     }
     return last;
   }

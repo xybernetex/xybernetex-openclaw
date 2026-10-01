@@ -96,6 +96,16 @@ a row with no improvement.
 openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.mode auto
 ```
 
+Some reasoning models deliberate at length before writing any checks; GLM-5.3
+Flash often used more than 8,000 tokens and returned nothing. When that
+happens the log shows `contract_unavailable` and the run is judged as if
+contracts were off. You can have a different model write contracts:
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.model "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731"
+openclaw config set plugins.entries.xybernetex-openclaw.llm.allowModelOverride true --strict-json
+```
+
 **Stops runaway runs.** The governor gives each run a budget: 150 tool
 calls, an hour, and no more than 4 identical calls in a row (`"standard"`),
 or your own limits. The call that crosses a limit is blocked with a message
@@ -215,6 +225,7 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `contracts.maxFixes` | `2` | Fix turns for a failed contract (0-5) |
 | `contracts.ratchet` | `true` | Snapshot before each fix and undo fixes that break a passing check |
 | `contracts.noProgressRounds` | `2` | Fix rounds in a row without improvement before the loop stops |
+| `contracts.model` | the run's model | Write contracts with this model ref instead; needs `llm.allowModelOverride` (see below) |
 | `contracts.agentIds` | every agent | Only these agents get contracts |
 | `governor` | off | `"standard"` or `{ maxToolCalls, maxSeconds, repeatLimit }` |
 | `endpoint` | - | `https://api.xybernetex.com/evaluate` |

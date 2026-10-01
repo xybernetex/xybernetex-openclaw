@@ -15,9 +15,12 @@
   identical calls in a row) or custom limits. The crossing call and every
   call after it are blocked with a stop-and-summarize message; the run gets
   no follow-up.
-- **A reasoning model's empty contract gets a second try.** If the contract
-  reply is cut off at its token limit (GLM-5.3 Flash spent all 8,000 tokens
-  thinking, live), the writer retries once with 32,000.
+- **Reasoning models that never finish a contract.** GLM-5.3 Flash, live,
+  often deliberated past the whole budget and returned nothing. The writer
+  now asks for low reasoning effort, retries a reply cut off at its limit
+  once with 32,000 tokens, and `contracts.model` lets another model write
+  contracts (needs `llm.allowModelOverride`; falls back to the run's model if
+  refused).
 - **Follow-up turns aren't mistaken for user requests** when interventions
   are off but contracts are on.
 
