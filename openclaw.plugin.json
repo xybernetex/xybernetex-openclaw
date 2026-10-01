@@ -20,6 +20,18 @@
           "minToolCalls": { "type": "integer", "minimum": 0, "default": 1 }
         }
       },
+      "contracts": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Acceptance checks for each run: the run's model writes them from the request (api.runtime.llm, no tools); when the run ends they run in the session's sandbox on a copy of the run's folder, and only failures get a fix turn naming what failed. The ratchet undoes any fix that makes a passing check fail. Decides that run's follow-up in place of interventions. Needs hooks.allowConversationAccess; set llm.allowAgentIdOverride so each agent's own model writes its contracts.",
+        "properties": {
+          "mode": { "type": "string", "enum": ["off", "auto"], "default": "off" },
+          "agentIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Limit to these agents; omit for all." },
+          "maxFixes": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2, "description": "Fix turns for a failed contract." },
+          "ratchet": { "type": "boolean", "default": true, "description": "Snapshot the run's folder before each fix turn and undo fixes that break a passing check." },
+          "maxSnapshotMb": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 200, "description": "Run folders larger than this get no ratchet." }
+        }
+      },
       "interventions": {
         "type": "object",
         "additionalProperties": false,

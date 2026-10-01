@@ -82,15 +82,15 @@ const WRAPPERS = new Set([
   "npx", "pnpx", "bunx", "uvx", ...SHELL_KEYWORDS,
 ]);
 
-function stripQuoted(command) {
+export function stripQuoted(command) {
   return command.replace(/"(?:[^"\\`]|[\\`].)*"|'[^']*'/g, '""');
 }
 
-function segments(command) {
+export function segments(command) {
   return stripQuoted(command).split(/\r?\n|;|&&|\|\||\||[{}()]/).map((s) => s.trim()).filter(Boolean);
 }
 
-function words(segment) {
+export function words(segment) {
   const all = segment.split(/\s+/).filter(Boolean);
   let i = 0;
   // Skip `$x = ...` assignments, env-style VAR=value prefixes, and wrappers.

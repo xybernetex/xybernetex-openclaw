@@ -10,9 +10,10 @@ import { createSupervisor } from "./src/supervisor.js";
 import { createToolGate } from "./src/control.js";
 import { createAuthorizationTracker } from "./src/authz.js";
 import { createFinalizeVerifier } from "./src/verify.js";
-import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunError, lastReplyError, retriable }
+import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunError, isOurs, lastReplyError, retriable }
   from "./src/interventions.js";
 import { createOutcomeSender, createOutcomeTracker } from "./src/outcomes.js";
+import { createContracts } from "./src/contract_runner.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -25,6 +26,7 @@ type Config = {
   verifyBeforeFinish?: { agentIds: string[]; instruction?: string; minToolCalls?: number };
   interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number; policy?: "remote" | "v0";
     shareOutcomes?: boolean; quietMinutes?: number };
+  contracts?: { mode?: "off" | "auto"; agentIds?: string[]; maxFixes?: number; ratchet?: boolean; maxSnapshotMb?: number };
   control?: {
     mode?: "observe" | "enforce";
     preset?: "none" | "recommended" | "strict";
@@ -91,6 +93,27 @@ export default {
         shareOutcomes: share });
     }
 
+    // Contracts (src/contract_runner.js): the run's model writes acceptance
+    // checks from the request; when the run ends they run in the session's
+    // sandbox, and only failures get a fix turn, under the ratchet. Off unless
+    // configured; needs api.runtime.llm and api.runtime.agent (OpenClaw 2026.9).
+    let contracts: ReturnType<typeof createContracts> | null = null;
+    if (config.contracts && (config.contracts.mode ?? "off") !== "off") {
+      const llm = api.runtime?.llm;
+      const agentRuntime = api.runtime?.agent;
+      if (typeof llm?.complete !== "function" || typeof agentRuntime?.resolveAgentWorkspaceDir !== "function") {
+        writeLog({ error: "contracts need api.runtime.llm and api.runtime.agent (OpenClaw 2026.9 or later): disabled" });
+      } else {
+        contracts = createContracts({ config: config.contracts, log: writeLog, schedule: createCliScheduler(),
+          complete: (params: any) => llm.complete(params),
+          workspaceDir: (agentId: string) => {
+            try { return agentRuntime.resolveAgentWorkspaceDir(api.runtime?.config?.current?.(), agentId) ?? null; } catch { return null; }
+          } });
+        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, maxFixes: config.contracts.maxFixes ?? 2,
+          ratchet: config.contracts.ratchet !== false });
+      }
+    }
+
     // The user's own turn, before the model reads anything - the only text
     // src/authz.js accepts as authorization, so instructions planted in files
     // or tool results can't grant it. Always passes: this hook only observes
@@ -99,11 +122,14 @@ export default {
     try {
       api.on("before_agent_run", (event: any, ctx: any) => {
         try {
+          const oursTurn = isOurs(event?.prompt);
+          try { contracts?.noteRunStart(runKeyOf(event, ctx), ctx, event?.prompt, oursTurn); } catch { /* best-effort */ }
           // Our own follow-up turn is never the user's request.
           if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) {
             outcomes?.noteFollowupStart(ctx?.sessionKey, runKeyOf(event, ctx));
             return { outcome: "pass" };
           }
+          if (oursTurn) return { outcome: "pass" };  // ours, with follow-ups not configured (a contract fix turn)
           const provenance = ctx?.inputProvenance?.kind ?? null;
           const accepted = authz.setRequest(ctx?.sessionKey, event?.prompt, provenance);
           // The user's next message is how the last run's episode ended.
@@ -143,6 +169,7 @@ export default {
       // page) can't authorize itself, so its target is held (src/control.js).
       try { gate.noteToolResult(event, ctx); } catch { /* the gate still judges every call */ }
       try { outcomes?.noteToolCall(runKeyOf(event, ctx), event?.toolName, Boolean(event?.error)); } catch { /* best-effort */ }
+      try { contracts?.noteToolCall(runKeyOf(event, ctx), event?.toolName, event?.params); } catch { /* best-effort */ }
       void supervisor.recordToolCall(runKeyOf(event, ctx), {
         toolName: event.toolName,
         params: event.params,
@@ -160,7 +187,7 @@ export default {
       const runKey = runKeyOf(event, ctx);
       writeLog({ runKey, runUsage: event?.usage ?? null, model: event?.model });
       outcomes?.noteUsage(runKey, Number(event?.usage?.total));
-      if (interventions && typeof event?.model === "string") {
+      if ((interventions || contracts) && typeof event?.model === "string") {
         const model = event.model.includes("/") && !event.model.startsWith("@") ? event.model
           : event.provider ? `${event.provider}/${event.model}` : event.model;
         runModels.set(runKey, model);
@@ -208,19 +235,24 @@ export default {
       // Never awaited: an intervention can't hold up the end of a run. The
       // short wait lets OpenClaw report the run's model (llm_output lands
       // just after agent_end), so a follow-up runs on the same model.
-      if (interventions) {
+      // A contract decides its run's follow-up; without one, the interventions rule does.
+      if (interventions || contracts) {
         setTimeout(() => {
           const model = runModels.get(runKey) ?? null;
           runModels.delete(runKey);
-          void interventions.onRunEnd(runKey, ctx, { ...summary, model })
-            .then((entry: any) => { if (entry) outcomes?.open(entry, { ...summary, retriable: retriable(summary.error) }); })
-            .catch(() => {});
+          void (async () => {
+            if (contracts && await contracts.onFixEnd(runKey, ctx)) return;  // one of our fix turns
+            const decided = contracts ? await contracts.onRunEnd(runKey, ctx, summary, model) : null;
+            const entry = decided ?? (interventions ? await interventions.onRunEnd(runKey, ctx, { ...summary, model }) : null);
+            if (entry) outcomes?.open(entry, { ...summary, retriable: retriable(summary.error) });
+          })().catch(() => {});
         }, 400);
       }
     });
     api.on("session_end", (_event: any, ctx: any) => {
       if (ctx?.sessionKey) authz.endSession(ctx.sessionKey);
       if (ctx?.sessionKey) outcomes?.endSession(ctx.sessionKey);
+      if (ctx?.sessionKey) contracts?.endSession(ctx.sessionKey);
     });
   },
 };
