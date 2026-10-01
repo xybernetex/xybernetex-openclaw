@@ -15,6 +15,7 @@ import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunE
   from "../src/interventions.js";
 import { createOutcomeSender, createOutcomeTracker } from "../src/outcomes.js";
 import { createContracts } from "../src/contract_runner.js";
+import { createGovernor, limitsFrom } from "../src/governor.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -27,7 +28,9 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                                                                                            
                                                                                                                  
                                                      
-                                                                                                                           
+                                                                                                                         
+                                
+                                                                                               
              
                                  
                                                
@@ -94,6 +97,12 @@ export default {
         shareOutcomes: share });
     }
 
+    // The governor (src/governor.js): stops runs that spend without progress -
+    // a tool-call or time budget, the same call over and over. Off unless configured.
+    const limits = limitsFrom(config.governor);
+    const governor = limits ? createGovernor(limits, { log: writeLog }) : null;
+    if (governor) writeLog({ type: "governor_ready", ...limits });
+
     // Contracts (src/contract_runner.js): the run's model writes acceptance
     // checks from the request; when the run ends they run in the session's
     // sandbox, and only failures get a fix turn, under the ratchet. Off unless
@@ -124,6 +133,7 @@ export default {
       api.on("before_agent_run", (event     , ctx     ) => {
         try {
           const oursTurn = isOurs(event?.prompt);
+          governor?.start(runKeyOf(event, ctx));
           try { contracts?.noteRunStart(runKeyOf(event, ctx), ctx, event?.prompt, oursTurn); } catch { /* best-effort */ }
           // Our own follow-up turn is never the user's request.
           if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) {
@@ -150,6 +160,9 @@ export default {
             toolCallId: event.toolCallId ?? ctx?.toolCallId, sessionKey: ctx?.sessionKey });
         } catch { /* telemetry failure must not bypass the gate */ }
       }
+      // A run the governor stopped gets no more calls; the model is told to summarize.
+      const stop = governor?.onCall(runKeyOf(event, ctx), event?.toolCallId ?? ctx?.toolCallId, event?.toolName, event?.params);
+      if (stop) return { block: true, blockReason: stop };
       return gate(event, ctx);
     }, { priority: 100 });
     writeLog({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
@@ -230,14 +243,20 @@ export default {
           summary.error = lastReplyError(event?.messages);
         }
       } catch { /* transcript shape changed: leave it as reported */ }
-      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary });
+      const stoppedBy = governor?.end(runKey) ?? null;
+      writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary,
+        ...(stoppedBy ? { governor: stoppedBy } : {}) });
       supervisor.endRun(runKey);
       outcomes?.noteRunEnd(runKey, summary.success);
       // Never awaited: an intervention can't hold up the end of a run. The
       // short wait lets OpenClaw report the run's model (llm_output lands
       // just after agent_end), so a follow-up runs on the same model.
       // A contract decides its run's follow-up; without one, the interventions rule does.
-      if (interventions || contracts) {
+      // A run the governor stopped gets no follow-up: its budget is spent.
+      if (stoppedBy && (interventions || contracts)) {
+        writeLog({ type: "intervention", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, action: "none",
+          probability: 1, rule: `governor-${stoppedBy}`, policy: "governor", scheduled: false });
+      } else if (interventions || contracts) {
         setTimeout(() => {
           const model = runModels.get(runKey) ?? null;
           runModels.delete(runKey);

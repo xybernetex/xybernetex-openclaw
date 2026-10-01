@@ -29,8 +29,19 @@
           "agentIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Limit to these agents; omit for all." },
           "maxFixes": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2, "description": "Fix turns for a failed contract." },
           "ratchet": { "type": "boolean", "default": true, "description": "Snapshot the run's folder before each fix turn and undo fixes that break a passing check." },
-          "maxSnapshotMb": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 200, "description": "Run folders larger than this get no ratchet." }
+          "maxSnapshotMb": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 200, "description": "Run folders larger than this get no ratchet." },
+          "noProgressRounds": { "type": "integer", "minimum": 1, "maximum": 5, "default": 2, "description": "Fix rounds in a row without improvement before the loop stops." }
         }
+      },
+      "governor": {
+        "description": "Stop runs that spend without progress: \"standard\" (150 tool calls, an hour, 4 identical calls in a row) or your own limits. The call that crosses a limit and every call after it are blocked with a message telling the model to stop and summarize; the run gets no follow-up.",
+        "oneOf": [
+          { "type": "string", "enum": ["standard"] },
+          { "type": "object", "additionalProperties": false, "properties": {
+            "maxToolCalls": { "type": "integer", "minimum": 1 },
+            "maxSeconds": { "type": "integer", "minimum": 1 },
+            "repeatLimit": { "type": "integer", "minimum": 2 } } }
+        ]
       },
       "interventions": {
         "type": "object",

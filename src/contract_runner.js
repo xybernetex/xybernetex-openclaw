@@ -103,6 +103,9 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   const maxFixes = config.maxFixes ?? 2;
   if (!Number.isInteger(maxFixes) || maxFixes < 0 || maxFixes > 5) throw new Error("contracts.maxFixes must be 0-5");
   const ratchet = config.ratchet !== false;
+  // Fix rounds in a row without improvement before the loop gives up (the governor's no-progress stop).
+  const noProgressRounds = config.noProgressRounds ?? 2;
+  if (!Number.isInteger(noProgressRounds) || noProgressRounds < 1) throw new Error("contracts.noProgressRounds must be 1 or more");
   const maxSnapshotBytes = (config.maxSnapshotMb ?? 200) * 1024 * 1024;
   const pending = new Map();   // runKey -> { sessionKey, agentId, writing, workdirs }
   const loops = new Map();     // sessionKey -> a contract's fix loop in progress
@@ -112,7 +115,8 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
 
   async function write(prompt, agentId) {
     const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
-      purpose: "xybernetex.contract", maxTokens: 2000, temperature: 0 };
+      // Room for a reasoning model to think and still write the JSON.
+      purpose: "xybernetex.contract", maxTokens: 8000, temperature: 0 };
     let result;
     let writer = "agent";
     try {
@@ -129,7 +133,10 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
     try {
       return { contract: parseGenerated(result?.text), writer, tokens: result?.usage?.totalTokens ?? null };
     } catch (err) {
-      return { contract: null, writer, error: String(err?.message ?? err).slice(0, 160), tokens: result?.usage?.totalTokens ?? null };
+      // Why it couldn't be read - the reply's size and stop reason, never its text.
+      const why = `${String(err?.message ?? err).slice(0, 120)} (reply ${String(result?.text ?? "").length} chars, ` +
+        `stop ${result?.stopReason ?? "unknown"})`;
+      return { contract: null, writer, error: why, tokens: result?.usage?.totalTokens ?? null };
     }
   }
 
@@ -255,7 +262,7 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
         scheduled: false };
       if (!met && maxFixes > 0) {
         const loop = { sessionKey: p.sessionKey, agentId: p.agentId, model: model ?? null, contract, place, best: verdict,
-          round: 1, token: null, outcomes: [] };
+          round: 1, token: null, outcomes: [], stalls: 0 };
         loops.set(p.sessionKey, loop);
         bound(loops);
         try {
@@ -298,9 +305,13 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
         loop.token = null;
       }
       loop.outcomes.push(outcome);
+      loop.stalls = outcome === "improved" ? 0 : loop.stalls + 1;
       safeLog({ type: "ratchet", sessionKey: loop.sessionKey, round: loop.round, outcome, passed: passing(next).size,
         kept: passing(loop.best).size, checks: next.results.length });
-      if (passedAll(loop.best) || loop.round >= maxFixes) {
+      if (passedAll(loop.best) || loop.round >= maxFixes || loop.stalls >= noProgressRounds) {
+        if (!passedAll(loop.best) && loop.stalls >= noProgressRounds && loop.round < maxFixes) {
+          safeLog({ type: "governor_stop", sessionKey: loop.sessionKey, reason: "no-progress", rounds: loop.round });
+        }
         end(loop, passedAll(loop.best));
         return true;
       }
