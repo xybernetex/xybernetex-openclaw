@@ -113,8 +113,10 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   const bound = (m) => { while (m.size > 500) m.delete(m.keys().next().value); };
   const safeLog = (e) => { try { log(e); } catch { /* best-effort */ } };
 
-  // A reasoning model can spend the whole budget thinking and return nothing (GLM-5.3 Flash did at 8000
-  // tokens, live): a reply cut off at the limit gets one more try with more room.
+  // A reasoning model can spend the whole budget thinking and return nothing: GLM-5.3 Flash deliberated past
+  // 32000 tokens on a detailed request, live, and wrote 4 checks in 529 at low effort. So the writer asks
+  // for low reasoning (hosts that can't set it ignore it), and a reply cut off at the limit gets one more
+  // try with more room.
   const WRITER_BUDGETS = [8000, 32000];
 
   async function write(prompt, agentId) {
@@ -122,7 +124,7 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
     let last = null;
     for (const maxTokens of WRITER_BUDGETS) {
       const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
-        purpose: "xybernetex.contract", maxTokens, temperature: 0 };
+        purpose: "xybernetex.contract", maxTokens, temperature: 0, reasoning: "low" };
       let result;
       try {
         result = await complete({ ...params, ...(writer === "agent" ? { agentId } : {}) });

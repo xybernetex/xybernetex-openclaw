@@ -314,3 +314,16 @@ test("a contract reply cut off at the token limit gets one retry with more room;
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the contract writer asks for low reasoning effort", async () => {
+  const seen = [];
+  const contracts = createContracts({
+    config: { mode: "auto", maxFixes: 1, ratchet: false },
+    complete: async (p) => { seen.push(p); return { text: "nope", stopReason: "stop", usage: {} }; },
+    workspaceDir: () => tmpdir(), schedule: async () => {}, log: () => {},
+  });
+  contracts.noteRunStart("r1", { sessionKey: "s", agentId: "a" }, "Write t.", false);
+  await contracts.onRunEnd("r1", { sessionKey: "s", agentId: "a" }, { success: true, toolCalls: 1 }, null);
+  assert.equal(seen[0].reasoning, "low");
+  assert.equal(seen[0].temperature, 0);
+});
