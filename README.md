@@ -76,7 +76,7 @@ marked `[xybernetex]`. A session gets at most 3 follow-ups, and the gateway at
 most 10 a minute. Follow-up turns never count as the user's request, so they
 can't authorize a destructive action.
 
-**Checks the work against a contract.** With `contracts.mode` set to
+**Checks the work against a contract (experimental).** With `contracts.mode` set to
 `auto`, the run's own model turns the user's request into acceptance checks
 before the run is judged: read-only shell commands such as
 `python3 test_totals.py` or `test -f totals.csv`. Checks that would write
@@ -96,10 +96,13 @@ a row with no improvement.
 openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.mode auto
 ```
 
-Some reasoning models deliberate at length before writing any checks; GLM-5.3
-Flash often used more than 8,000 tokens and returned nothing. When that
-happens the log shows `contract_unavailable` and the run is judged as if
-contracts were off. You can have a different model write contracts:
+Contracts are experimental. In our tests on Cloudflare Workers AI they worked
+on short requests, but on detailed ones GLM-5.3 Flash and DeepSeek V4 Flash
+often deliberated past 32,000 tokens and wrote nothing. The plugin asks for low
+reasoning effort, which fixes this when called directly, but OpenClaw doesn't
+pass that setting to every provider. When no contract gets written, the log
+shows `contract_unavailable` and the run is judged as if contracts were off.
+You can have a different model write contracts:
 
 ```bash
 openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.model "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731"

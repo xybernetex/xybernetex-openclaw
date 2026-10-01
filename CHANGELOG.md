@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased (0.4.3)
+## 0.4.3
 
-- **Contracts.** `contracts.mode: "auto"` has the run's own model write
+- **Contracts (experimental).** `contracts.mode: "auto"` has the run's own model write
   acceptance checks (read-only shell commands) from the user's request. When
   the run ends they run in the session's sandbox on a copy of the run's
   folder, and only failures get a fix turn naming what failed. Checks that
@@ -20,7 +20,9 @@
   now asks for low reasoning effort, retries a reply cut off at its limit
   once with 32,000 tokens, and `contracts.model` lets another model write
   contracts (needs `llm.allowModelOverride`; falls back to the run's model if
-  refused).
+  refused). On Workers AI through OpenClaw, detailed requests often still
+  get no contract: OpenClaw doesn't pass the reasoning setting to that
+  provider. Such runs are judged as if contracts were off.
 - **Follow-up turns aren't mistaken for user requests** when interventions
   are off but contracts are on.
 
