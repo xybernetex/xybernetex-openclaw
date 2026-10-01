@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.4
+
+- **Renamed to Xybernetex Supervisor** (was Xybernetex Safety Gate): it now
+  also checks the agent's work, undoes fixes that break what worked and stops
+  runaway runs. The package name, `xybernetex-openclaw`, and every config key
+  are unchanged.
+
 ## 0.4.3
 
 - **Contracts (experimental).** `contracts.mode: "auto"` has the run's own model write

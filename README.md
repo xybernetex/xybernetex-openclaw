@@ -1,4 +1,4 @@
-# Xybernetex for OpenClaw
+# Xybernetex Supervisor for OpenClaw
 
 The control plane for [OpenClaw](https://github.com/openclaw/openclaw) agents.
 It stops destructive actions nobody asked for, lets the ones your users asked

@@ -42,7 +42,7 @@ type Config = {
 
 export default {
   id: "xybernetex-openclaw",
-  name: "Xybernetex Safety Gate",
+  name: "Xybernetex Supervisor",
   description: "Holds destructive actions nobody asked for. Instructions planted in files or web pages can't authorize " +
     "themselves, and your own requests run without a prompt.",
   register(api: any) {
