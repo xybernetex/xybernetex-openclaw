@@ -113,31 +113,41 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   const bound = (m) => { while (m.size > 500) m.delete(m.keys().next().value); };
   const safeLog = (e) => { try { log(e); } catch { /* best-effort */ } };
 
+  // A reasoning model can spend the whole budget thinking and return nothing (GLM-5.3 Flash did at 8000
+  // tokens, live): a reply cut off at the limit gets one more try with more room.
+  const WRITER_BUDGETS = [8000, 32000];
+
   async function write(prompt, agentId) {
-    const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
-      // Room for a reasoning model to think and still write the JSON.
-      purpose: "xybernetex.contract", maxTokens: 8000, temperature: 0 };
-    let result;
-    let writer = "agent";
-    try {
-      result = await complete({ ...params, ...(agentId ? { agentId } : {}) });
-    } catch (err) {
-      if (!agentId) return { contract: null, error: `${err?.code ?? "error"}: ${String(err?.message ?? err).slice(0, 120)}` };
-      // Writing with another agent's model needs plugins.entries.<id>.llm.allowAgentIdOverride; the default
-      // agent's model will do.
-      writer = "default";
-      try { result = await complete(params); } catch (err2) {
-        return { contract: null, error: `${err2?.code ?? "error"}: ${String(err2?.message ?? err2).slice(0, 120)}` };
+    let writer = agentId ? "agent" : "default";
+    let last = null;
+    for (const maxTokens of WRITER_BUDGETS) {
+      const params = { messages: [{ role: "user", content: contractPrompt(prompt) }], systemPrompt: SYSTEM,
+        purpose: "xybernetex.contract", maxTokens, temperature: 0 };
+      let result;
+      try {
+        result = await complete({ ...params, ...(writer === "agent" ? { agentId } : {}) });
+      } catch (err) {
+        if (writer !== "agent") return { contract: null, error: `${err?.code ?? "error"}: ${String(err?.message ?? err).slice(0, 120)}` };
+        // Writing with another agent's model needs plugins.entries.<id>.llm.allowAgentIdOverride; the default
+        // agent's model will do.
+        writer = "default";
+        try { result = await complete(params); } catch (err2) {
+          return { contract: null, error: `${err2?.code ?? "error"}: ${String(err2?.message ?? err2).slice(0, 120)}` };
+        }
+      }
+      const tokens = (last?.tokens ?? 0) + (result?.usage?.totalTokens ?? 0) || null;
+      try {
+        return { contract: parseGenerated(result?.text), writer, tokens };
+      } catch (err) {
+        // Why it couldn't be read - the reply's size and stop reason, never its text.
+        const why = `${String(err?.message ?? err).slice(0, 120)} (reply ${String(result?.text ?? "").length} chars, ` +
+          `stop ${result?.stopReason ?? "unknown"}, budget ${maxTokens})`;
+        last = { contract: null, writer, error: why, tokens };
+        const cutOff = /length|max_tokens/i.test(String(result?.stopReason ?? ""));
+        if (!cutOff) return last;
       }
     }
-    try {
-      return { contract: parseGenerated(result?.text), writer, tokens: result?.usage?.totalTokens ?? null };
-    } catch (err) {
-      // Why it couldn't be read - the reply's size and stop reason, never its text.
-      const why = `${String(err?.message ?? err).slice(0, 120)} (reply ${String(result?.text ?? "").length} chars, ` +
-        `stop ${result?.stopReason ?? "unknown"})`;
-      return { contract: null, writer, error: why, tokens: result?.usage?.totalTokens ?? null };
-    }
+    return last;
   }
 
   // Where the checks run, and where the ratchet snapshots: the sandbox (or the host) and the run's folder.

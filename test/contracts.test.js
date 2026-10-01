@@ -284,3 +284,33 @@ test("without OpenClaw's llm runtime, contracts stay off and say why", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a contract reply cut off at the token limit gets one retry with more room; other bad replies don't", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-writer-"));
+  try {
+    for (const [replies, wantCalls, wantContract] of [
+      [[{ text: "", stopReason: "length" }, { text: '{"checks":[{"name":"t","command":"test -f t"}]}', stopReason: "stop" }], 2, true],
+      [[{ text: "", stopReason: "length" }, { text: "", stopReason: "length" }], 2, false],
+      [[{ text: "no json here", stopReason: "stop" }], 1, false],
+    ]) {
+      const budgets = [];
+      const logs = [];
+      const contracts = createContracts({
+        config: { mode: "auto", maxFixes: 1, ratchet: false },
+        complete: async (p) => { budgets.push(p.maxTokens); return { ...replies[budgets.length - 1], usage: { totalTokens: 10 } }; },
+        workspaceDir: () => dir, schedule: async () => {}, log: (e) => logs.push(e),
+        sandboxFor: async () => "sbx", runImpl: async () => ({ code: 0, output: "" }),
+      });
+      const ctx = { sessionKey: "s", agentId: "a" };
+      contracts.noteRunStart("r1", ctx, "Write t.", false);
+      await contracts.onRunEnd("r1", ctx, { success: true, toolCalls: 1 }, null);
+      assert.deepEqual(budgets, [8000, 32000].slice(0, wantCalls));
+      const made = logs.find((e) => e.type === "contract");
+      assert.equal(Boolean(made), wantContract);
+      if (made) assert.equal(made.tokens, 20);
+      else assert.match(logs.find((e) => e.type === "contract_unavailable").reason, /budget/);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
