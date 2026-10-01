@@ -9,9 +9,10 @@ agents actually did.
 npx xybernetex-openclaw --restart
 ```
 
-Get a free API key at **[app.xybernetex.com](https://app.xybernetex.com)**
-(design partner beta). You can also install without a key: the safety gate and
-the report run entirely on your machine.
+Everything runs on your machine, and no account is needed: the safety gate,
+contracts, the ratchet, the governor and the report are all local. An API key
+from **[app.xybernetex.com](https://app.xybernetex.com)** is optional; it lets
+the policy service choose which runs get a follow-up.
 
 ## What it does
 
@@ -74,6 +75,36 @@ In act mode the follow-up turn appears in the session like any other message,
 marked `[xybernetex]`. A session gets at most 3 follow-ups, and the gateway at
 most 10 a minute. Follow-up turns never count as the user's request, so they
 can't authorize a destructive action.
+
+**Checks the work against a contract.** With `contracts.mode` set to
+`auto`, the run's own model turns the user's request into acceptance checks
+before the run is judged: read-only shell commands such as
+`python3 test_totals.py` or `test -f totals.csv`. Checks that would write
+anything are refused. When the run ends they run in the session's sandbox on
+a copy of the run's folder. If they all pass, nothing more happens. If any
+fail, the agent gets a fix turn that names exactly which checks failed and
+why.
+
+**Never lets a fix make things worse.** Before each fix turn the run's
+folder is snapshotted (the ratchet). After the fix the checks run again: if
+any check that passed before now fails, the folder is restored and the agent
+is told what its fix broke. Fix rounds stop when every check passes, after
+`contracts.maxFixes` rounds, or after `contracts.noProgressRounds` rounds in
+a row with no improvement.
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.mode auto
+```
+
+**Stops runaway runs.** The governor gives each run a budget: 150 tool
+calls, an hour, and no more than 4 identical calls in a row (`"standard"`),
+or your own limits. The call that crosses a limit is blocked with a message
+telling the model to stop and summarize, every call after it is blocked too,
+and the run gets no follow-up.
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.governor standard
+```
 
 **Measures outcomes.** Your real work has no answer key, so Xybernetex watches
 for the signals it can see: whether a retry finished the run, whether a
@@ -180,6 +211,12 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `interventions.policy` | `remote` | `remote` lets the policy service decide (falls back to `v0` offline); `v0` always retries dead runs and checks finished ones |
 | `interventions.shareOutcomes` | `true` | Send outcome labels and counts to the policy service |
 | `interventions.quietMinutes` | `30` | How long to wait for the user's next message before recording a run's outcome without one |
+| `contracts.mode` | `off` | `auto`: the run's model writes acceptance checks; failures get fix turns |
+| `contracts.maxFixes` | `2` | Fix turns for a failed contract (0-5) |
+| `contracts.ratchet` | `true` | Snapshot before each fix and undo fixes that break a passing check |
+| `contracts.noProgressRounds` | `2` | Fix rounds in a row without improvement before the loop stops |
+| `contracts.agentIds` | every agent | Only these agents get contracts |
+| `governor` | off | `"standard"` or `{ maxToolCalls, maxSeconds, repeatLimit }` |
 | `endpoint` | - | `https://api.xybernetex.com/evaluate` |
 | `apiKey` | - | Your key; the `XYBERNETEX_API_KEY` environment variable takes precedence |
 | `logPath` | `~/.openclaw/xybernetex-supervisor.jsonl` | Local log (labels and hashes only) |

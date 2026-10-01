@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased (0.4.3)
+
+- **Contracts.** `contracts.mode: "auto"` has the run's own model write
+  acceptance checks (read-only shell commands) from the user's request. When
+  the run ends they run in the session's sandbox on a copy of the run's
+  folder, and only failures get a fix turn naming what failed. Checks that
+  would write are refused. Uses `api.runtime.llm`; set
+  `llm.allowAgentIdOverride` so each agent's own model writes its contracts.
+- **The ratchet.** The run's folder is snapshotted before each fix turn; a
+  fix that makes a passing check fail is undone and the agent is told so.
+  Fix rounds stop after `noProgressRounds` rounds without improvement.
+- **The governor.** `governor: "standard"` (150 tool calls, an hour, 4
+  identical calls in a row) or custom limits. The crossing call and every
+  call after it are blocked with a stop-and-summarize message; the run gets
+  no follow-up.
+- **Follow-up turns aren't mistaken for user requests** when interventions
+  are off but contracts are on.
+
 ## 0.4.2
 
 - **Commands hidden by quoting are classified.** The shell runs `$(...)` and
