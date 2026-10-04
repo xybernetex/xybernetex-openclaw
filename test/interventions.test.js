@@ -234,3 +234,20 @@ test("the remote decider sends only the run's shape and falls back to v0 when th
     fetchImpl: async () => new Response(JSON.stringify({ action: "delete-everything" })) });
   assert.equal((await junk({ success: true, toolCalls: 0 })).policy, "local-v0");
 });
+
+test("escalate: a dead run's retry runs on the stronger model; a verify without its own stays on the run's", async () => {
+  const scheduled = [];
+  const logs = [];
+  const iv = createInterventions({ config: { mode: "act", escalate: { retry: "workers-ai/@cf/strong" } },
+    log: (e) => logs.push(e), schedule: async (p) => { scheduled.push(p); return { id: "j" }; } });
+  const c = { sessionKey: "agent:main:e1", agentId: "main" };
+  const dead = await iv.onRunEnd("r1", c, { success: false, error: "incomplete_turn", toolCalls: 2, model: "workers-ai/@cf/cheap" });
+  assert.equal(dead.action, "retry");
+  assert.equal(scheduled[0].model, "workers-ai/@cf/strong");
+  assert.equal(dead.escalatedTo, "workers-ai/@cf/strong");
+  const fine = await iv.onRunEnd("r2", { ...c, sessionKey: "agent:main:e2" }, { success: true, toolCalls: 4, model: "workers-ai/@cf/cheap" });
+  assert.equal(fine.action, "verify");
+  assert.equal(scheduled[1].model, "workers-ai/@cf/cheap");
+  assert.equal(fine.escalatedTo, undefined);
+  assert.throws(() => createInterventions({ config: { escalate: { retyr: "x" } }, schedule: async () => {} }), /escalate/);
+});

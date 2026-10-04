@@ -28,7 +28,7 @@ type Config = {
   proposalTelemetry?: boolean;
   verifyBeforeFinish?: { agentIds: string[]; instruction?: string; minToolCalls?: number };
   interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number; policy?: "remote" | "v0";
-    shareOutcomes?: boolean; quietMinutes?: number };
+    shareOutcomes?: boolean; quietMinutes?: number; escalate?: { retry?: string; verify?: string } };
   contracts?: { mode?: "off" | "auto"; agentIds?: string[]; maxFixes?: number; ratchet?: boolean; maxSnapshotMb?: number;
     noProgressRounds?: number; model?: string; allowHost?: boolean };
   governor?: "standard" | { maxToolCalls?: number; maxSeconds?: number; repeatLimit?: number };

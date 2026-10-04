@@ -100,7 +100,15 @@ needs one more turn in the same session, on the same model:
   get one, and holds a share of runs out so the effect stays measurable.
 
 The same follow-ups run on a stronger model did better still (a retry rescued
-62%, a check added 18 points); choosing the follow-up's model is next.
+62%, a check added 18 points). To run your agents on a cheap model and spend
+on a strong one only when a run dies:
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.interventions.escalate.retry "workers-ai/@cf/deepseek-ai/deepseek-v4-pro-0813"
+```
+
+(`escalate.verify` does the same for check-your-work turns. The model has to
+be allowed by `agents.defaults.modelPolicy.allow`.)
 
 Setup starts this in observe mode: every decision is logged and shown in the
 report, and no turn is started. To let it act:
@@ -295,6 +303,7 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `control.preset` | `none` (setup sets `recommended`) | `recommended`, `strict` or `none` |
 | `control.rules` | `[]` | Extra rules; `agentId`/`toolName` accept `"*"` (a tool wildcard needs `riskAtLeast`) |
 | `interventions.mode` | off (setup sets `observe`) | `observe` decides and logs; `act` starts the follow-up turn |
+| `interventions.escalate` | the run's model | `{ retry, verify }`: model refs for follow-up turns |
 | `interventions.agentIds` | every agent | Only these agents get follow-ups |
 | `interventions.policy` | `remote` | `remote` lets the policy service decide (falls back to `v0` offline); `v0` always retries dead runs and checks finished ones |
 | `interventions.shareOutcomes` | `true` | Send outcome labels and counts to the policy service |

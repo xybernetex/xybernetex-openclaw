@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Escalate follow-ups to a stronger model.** `interventions.escalate.retry`
+  (and `.verify`) names the model a follow-up turn runs on. On our benchmark
+  a same-model retry finished 35% of dead runs and a stronger model's 62%.
+  The log records `escalatedTo`.
+
 ## 0.5.1
 
 - **Undo.** Before a tool call writes, overwrites, moves or deletes files in

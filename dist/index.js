@@ -29,7 +29,7 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                               
                                                                                            
                                                                                                                  
-                                                     
+                                                                                                     
                                                                                                                          
                                                                      
                                                                                                

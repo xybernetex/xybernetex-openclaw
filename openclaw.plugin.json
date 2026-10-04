@@ -61,6 +61,15 @@
         "additionalProperties": false,
         "description": "Follow-up turns after a run ends: \"retry\" when it died with unusable model output, \"verify\" (check your work) when it finished. observe logs the decision; act schedules the turn in the same session.",
         "properties": {
+          "escalate": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Run follow-up turns on a stronger model: on our benchmark a same-model retry finished 35% of dead runs, a stronger model's 62%. The model must be allowed by agents.defaults.modelPolicy.allow.",
+            "properties": {
+              "retry": { "type": "string", "minLength": 1, "description": "Model ref for retrying a run that died." },
+              "verify": { "type": "string", "minLength": 1, "description": "Model ref for check-your-work turns." }
+            }
+          },
           "mode": { "type": "string", "enum": ["observe", "act"], "default": "observe" },
           "agentIds": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Limit to these agents; omit for all." },
           "verifyRate": { "type": "number", "minimum": 0, "maximum": 1, "default": 1, "description": "v0 policy only: share of finished runs that get a verify turn." },

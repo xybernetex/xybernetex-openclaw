@@ -173,6 +173,14 @@ export function createInterventions({ schedule, log = () => {}, config = {}, dec
   const verifyRate = config.verifyRate ?? 1;
   if (typeof verifyRate !== "number" || verifyRate < 0 || verifyRate > 1) throw new Error("interventions.verifyRate must be 0-1");
   const chooser = decide ?? ((s) => decideV0(s, { verifyRate, random }));
+  // A stronger model for the follow-up turn: on our benchmark a same-model retry finished 35% of dead
+  // runs, a stronger model's 62%. Unset: the run's own model.
+  const escalate = config.escalate ?? {};
+  for (const [k, v] of Object.entries(escalate)) {
+    if (!["retry", "verify"].includes(k) || typeof v !== "string" || !v.trim()) {
+      throw new Error("interventions.escalate is { retry?: model ref, verify?: model ref }");
+    }
+  }
   const ours = new Set(); // runKeys of runs we started
   const perSession = new Map(); // sessionKey -> attempts so far
   const recent = []; // attempt timestamps, gateway-wide
@@ -222,8 +230,10 @@ export function createInterventions({ schedule, log = () => {}, config = {}, dec
         while (perSession.size > maxTracked) perSession.delete(perSession.keys().next().value);
         recent.push(t);
         try {
+          const stronger = escalate[decision.action] ?? null;
+          if (stronger) entry.escalatedTo = stronger;
           const handle = await schedule({ sessionKey, agentId: ctx?.agentId, message: MESSAGES[decision.action],
-            model: summary.model ?? null });
+            model: stronger ?? summary.model ?? null });
           entry.scheduled = Boolean(handle);
         } catch (err) {
           entry.error = String(err?.message ?? err).slice(0, 200);
