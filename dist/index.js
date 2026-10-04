@@ -17,6 +17,7 @@ import { createOutcomeSender, createOutcomeTracker } from "../src/outcomes.js";
 import { createContracts } from "../src/contract_runner.js";
 import { createGovernor, limitsFrom } from "../src/governor.js";
 import { loggedRecently } from "../src/logfile.js";
+import { DEFAULT_UNDO_DIR, createUndoJournal } from "../src/undo.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -32,6 +33,7 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                                                                                                                          
                                                                      
                                                                                                
+                                                                                     
              
                                  
                                                
@@ -102,6 +104,20 @@ export default {
         shareOutcomes: share });
     }
 
+    // The undo journal (src/undo.js): before a call visibly changes files in the agent's workspace, they're
+    // copied aside, so `npx xybernetex-openclaw undo` can put a run back. On unless undo.mode is "off".
+    let undo      = null;
+    if ((config.undo?.mode ?? "on") !== "off" && typeof api.runtime?.agent?.resolveAgentWorkspaceDir === "function") {
+      const agentRuntime = api.runtime.agent;
+      const undoSettings = { root: config.undo?.dir ?? DEFAULT_UNDO_DIR, maxRunMb: config.undo?.maxRunMb ?? 200,
+        keepRuns: config.undo?.keepRuns ?? 20 };
+      undo = createUndoJournal({ ...undoSettings, log: writeLog,
+        workspaceFor: (agentId        ) => {
+          try { return agentRuntime.resolveAgentWorkspaceDir(api.runtime?.config?.current?.(), agentId) ?? null; } catch { return null; }
+        } });
+      writeReady({ type: "undo_ready", ...undoSettings });
+    }
+
     // The governor (src/governor.js): stops runs that spend without progress -
     // a tool-call or time budget, the same call over and over. Off unless configured.
     const limits = limitsFrom(config.governor);
@@ -139,6 +155,7 @@ export default {
         try {
           const oursTurn = isOurs(event?.prompt);
           governor?.start(runKeyOf(event, ctx));
+          try { undo?.noteRunStart(runKeyOf(event, ctx), ctx, event?.prompt); } catch { /* never in the way */ }
           try { contracts?.noteRunStart(runKeyOf(event, ctx), ctx, event?.prompt, oursTurn); } catch { /* best-effort */ }
           // Our own follow-up turn is never the user's request.
           if (interventions?.noteRunStart(runKeyOf(event, ctx), event?.prompt)) {
@@ -168,7 +185,12 @@ export default {
       // A run the governor stopped gets no more calls; the model is told to summarize.
       const stop = governor?.onCall(runKeyOf(event, ctx), event?.toolCallId ?? ctx?.toolCallId, event?.toolName, event?.params);
       if (stop) return { block: true, blockReason: stop };
-      return gate(event, ctx);
+      const decision = gate(event, ctx);
+      // A call the gate lets through (or holds for approval) may change files: journal them first.
+      if (!decision?.block) {
+        try { undo?.beforeCall(runKeyOf(event, ctx), event?.toolName, event?.params); } catch { /* never in the way */ }
+      }
+      return decision;
     }, { priority: 100 });
     writeReady({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
       preset: config.control?.preset ?? "none", ruleIds: gate.ruleIds });
@@ -250,6 +272,7 @@ export default {
         }
       } catch { /* transcript shape changed: leave it as reported */ }
       const stoppedBy = governor?.end(runKey) ?? null;
+      try { undo?.endRun(runKey); } catch { /* never in the way */ }
       writeLog({ type: "run_end", runKey, sessionKey: ctx?.sessionKey, agentId: ctx?.agentId, ...summary,
         ...(stoppedBy ? { governor: stoppedBy } : {}) });
       supervisor.endRun(runKey);

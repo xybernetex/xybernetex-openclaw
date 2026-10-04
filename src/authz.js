@@ -375,7 +375,7 @@ function resolvePath(cwd, path) {
 // A shell call's commands, each with the folder it runs in: { cwd, cmd, args,
 // segment }. cwd is relative to the agent's workspace ("" = the workspace), or
 // null once a cd (or the call's workdir) goes somewhere we can't follow.
-function shellSteps(p) {
+export function shellSteps(p) {
   const text = p.command ?? p.cmd ?? p.input;
   if (typeof text !== "string") return null;
   const wd = p.workdir ?? p.cwd;

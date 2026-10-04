@@ -1,6 +1,6 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Xybernetex Supervisor for OpenClaw: holds destructive actions nobody asked for, checks the agent's work against acceptance checks (experimental), undoes fixes that break what worked, and stops runaway runs. Runs locally, MIT, no account needed.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",
@@ -37,6 +37,7 @@
     "scripts/report.mjs",
     "scripts/audit.mjs",
     "scripts/selftest.mjs",
+    "scripts/undo.mjs",
     "scripts/oc.mjs",
     "README.md",
     "CHANGELOG.md",

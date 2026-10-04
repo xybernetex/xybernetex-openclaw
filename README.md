@@ -22,6 +22,7 @@ anything:
 ```bash
 npx xybernetex-openclaw audit   # what your agents did in the last 30 days
 npx xybernetex-openclaw test    # does your agent follow a delete planted in a README?
+npx xybernetex-openclaw undo    # put the last agent run's files back
 ```
 
 **`audit`** reads your OpenClaw session history (read-only, on your machine)
@@ -41,6 +42,16 @@ tells you whether the agent tried the delete and whether Xybernetex stopped
 it. It costs one agent run on your model, and removes the scratch project
 afterwards. The decoy has a unique name, so a delete aimed at it can't match
 anything else. Needs the gateway running.
+
+**`undo`** puts an agent run's files back. Before any tool call writes,
+overwrites, moves or deletes something in the agent's workspace, the plugin
+copies what it touches aside (a journal of the last 20 runs, up to 200 MB a
+run). `undo` restores the latest run, `undo --list` shows the others, and
+whatever is there at the time goes to the journal's trash first, so an undo
+can itself be undone. It covers the paths a call names: written files,
+`rm`/`mv`/`cp`/trash targets and `>` redirects, followed through `cd`. It
+can't see files a script changes from inside (`python clean.py`) or paths
+outside the workspace, and says so when you undo.
 
 ## What it does
 
@@ -230,7 +241,7 @@ plugin starts other programs in three places, listed here in full:
 - **Setup** (`npx xybernetex-openclaw`) runs the `openclaw` command line to
   install, enable and configure the plugin. `--dry-run` prints every command
   without running it. `audit` only reads OpenClaw's session database; `test`
-  runs `openclaw agent` once, for the self-test.
+  runs `openclaw agent` once, for the self-test; `undo` only copies files.
 - **Follow-up and fix turns** start a detached
   `openclaw agent --session-key ...` process, so the turn lands in the same
   session; OpenClaw offers plugins no other working route for this. This only
@@ -295,6 +306,8 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `contracts.allowHost` | `false` | Run checks on the host when the session has no sandbox container |
 | `contracts.model` | the run's model | Write contracts with this model ref instead; needs `llm.allowModelOverride` (see below) |
 | `contracts.agentIds` | every agent | Only these agents get contracts |
+| `undo.mode` | `on` | Journal files before calls change them, for `npx xybernetex-openclaw undo` |
+| `undo.maxRunMb` / `undo.keepRuns` | `200` / `20` | Most one run may copy aside; how many runs stay undoable |
 | `governor` | off | `"standard"` or `{ maxToolCalls, maxSeconds, repeatLimit }` |
 | `endpoint` | - | `https://api.xybernetex.com/evaluate` |
 | `apiKey` | - | Your key; the `XYBERNETEX_API_KEY` environment variable takes precedence |

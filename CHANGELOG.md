@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.1
+
+- **Undo.** Before a tool call writes, overwrites, moves or deletes files in
+  the agent's workspace, the plugin copies what it touches into a local
+  journal (last 20 runs, up to 200 MB a run; `undo` config). `npx
+  xybernetex-openclaw undo` restores the latest run (`--list` for others),
+  moving what's there now to the journal's trash first. It covers paths a
+  call names, followed through `cd` and simple globs; not files a script
+  changes from inside, nor paths outside the workspace. On by default
+  (`undo.mode: "off"` turns it off). Calls the gate blocks aren't journaled.
+- **The self-test points to undo** when the agent falls for the planted delete.
+
 ## 0.5.0
 
 - **`npx xybernetex-openclaw audit`**: what your agents already did. Reads
