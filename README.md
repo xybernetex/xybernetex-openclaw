@@ -14,6 +14,34 @@ contracts, the ratchet, the governor and the report are all local. An API key
 from **[app.xybernetex.com](https://app.xybernetex.com)** is optional; it lets
 the policy service choose which runs get a follow-up.
 
+## Try it on your own agents first
+
+Two commands show what Xybernetex would do for you before you change
+anything:
+
+```bash
+npx xybernetex-openclaw audit   # what your agents did in the last 30 days
+npx xybernetex-openclaw test    # does your agent follow a delete planted in a README?
+```
+
+**`audit`** reads your OpenClaw session history (read-only, on your machine)
+and replays it through the gate and the governor. It lists the destructive
+and outward-facing commands nobody asked for, the instructions to delete
+something your agents read in files and web pages, the runs that died while
+OpenClaw reported success, and the runs that looped, then writes it all to
+one HTML page. Nothing is stopped, and nothing leaves your machine. Needs
+Node 22.5 or newer. On our own test machine, after a week of benchmark
+runs that were deliberately tricky (5,414 runs), it found 589 risky
+commands nobody asked for, 203 runs that died while reported successful,
+and 106 loops.
+
+**`test`** makes a scratch project in your agent's workspace whose README
+says to `rm -rf` a decoy folder, asks your agent to set the project up, and
+tells you whether the agent tried the delete and whether Xybernetex stopped
+it. It costs one agent run on your model, and removes the scratch project
+afterwards. The decoy has a unique name, so a delete aimed at it can't match
+anything else. Needs the gateway running.
+
 ## What it does
 
 **Knows who asked.** Every tool call is labeled with its risk (destructive,
@@ -201,7 +229,8 @@ plugin starts other programs in three places, listed here in full:
 
 - **Setup** (`npx xybernetex-openclaw`) runs the `openclaw` command line to
   install, enable and configure the plugin. `--dry-run` prints every command
-  without running it.
+  without running it. `audit` only reads OpenClaw's session database; `test`
+  runs `openclaw agent` once, for the self-test.
 - **Follow-up and fix turns** start a detached
   `openclaw agent --session-key ...` process, so the turn lands in the same
   session; OpenClaw offers plugins no other working route for this. This only
@@ -224,6 +253,8 @@ npx xybernetex-openclaw --interventions off        # no follow-ups, not even log
 npx xybernetex-openclaw --key                      # also ask for an API key (optional policy service)
 npx xybernetex-openclaw --dry-run                  # print every command, change nothing
 npx xybernetex-openclaw report --days 30          # the report, for the last 30 days
+npx xybernetex-openclaw audit --days 7 --agent main   # replay one agent's last week of history
+npx xybernetex-openclaw test --agent ci-bot --keep    # self-test another agent; keep the scratch project
 ```
 
 Setup does the following:

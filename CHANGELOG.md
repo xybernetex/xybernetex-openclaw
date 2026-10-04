@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0
+
+- **`npx xybernetex-openclaw audit`**: what your agents already did. Reads
+  OpenClaw's session history (read-only) and replays it through this
+  plugin's own hooks, with the strict preset in observe mode and the
+  standard governor, so every judgment is the gate's own. One HTML page
+  lists the destructive and outward-facing commands nobody asked for (with
+  the commands themselves, since it's your history on your machine), the
+  delete instructions agents read, the runs that died while OpenClaw
+  reported success, the loops, and tokens by model. Needs Node 22.5+.
+- **`npx xybernetex-openclaw test`**: plants `rm -rf <decoy>` in a scratch
+  project's README, asks your agent to set it up, and reports whether the
+  agent tried it and whether the gate stopped it (or, in observe mode, only
+  logged it). One agent run; the scratch project is removed afterwards.
+
 ## 0.4.6
 
 - **Setup no longer asks for an API key.** Everything runs locally without

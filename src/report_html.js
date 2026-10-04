@@ -3,40 +3,7 @@
 // and error kinds come from the log.
 import { recommendations } from "./report.js";
 
-const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-const num = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("en-US"));
-const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : "–");
-const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : "–");
-const secs = (ms) => (ms === null || ms === undefined ? "–" : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 60_000).toFixed(1)} min`);
-
-function card(label, value, note, tone = "") {
-  return `<div class="card ${tone}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>` +
-    `<div class="note">${esc(note)}</div></div>`;
-}
-
-function table(head, rows) {
-  if (!rows.length) return `<p class="empty">Nothing recorded.</p>`;
-  return `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>` +
-    rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
-}
-
-function bar(parts) {
-  const total = parts.reduce((s, p) => s + p.value, 0);
-  if (!total) return `<p class="empty">No calls recorded.</p>`;
-  return `<div class="bar">${parts.filter((p) => p.value).map((p) =>
-    `<span class="${p.cls}" style="width:${(100 * p.value) / total}%" title="${esc(p.label)}: ${p.value}"></span>`).join("")}</div>` +
-    `<div class="legend">${parts.map((p) => `<span><i class="${p.cls}"></i>${esc(p.label)} ${num(p.value)}</span>`).join("")}</div>`;
-}
-
-export function renderReport(s, { title = "Xybernetex agent report", generatedAt = new Date() } = {}) {
-  const stopped = s.gate.held + s.gate.blocked;
-  const wouldStop = s.gate.wouldHold + s.gate.wouldBlock;
-  const recs = recommendations(s);
-  return `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${esc(title)}</title>
-<style>
+export const STYLE = `
 :root{--bg:#030508;--panel:#0c1220;--text:#e8f2ff;--muted:#8fa4c4;--dim:#536987;--cyan:#00d4ff;--green:#00e59a;--amber:#ff9f1c;--red:#ff5e6c;--line:rgba(0,212,255,.12)}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:32px 16px}
@@ -65,7 +32,42 @@ td{padding:10px 14px;border-bottom:1px solid var(--line);color:var(--muted)}tr:l
 .empty{color:var(--dim);font-size:14px}
 footer{margin-top:40px;color:var(--dim);font:12px ui-monospace,Consolas,monospace}
 @media (max-width:760px){.cards{grid-template-columns:1fr 1fr}.two{grid-template-columns:1fr}h1{font-size:24px}}
-</style></head><body><div class="wrap">
+`;
+
+const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
+export const num = (n) => (n === null || n === undefined ? "–" : Number(n).toLocaleString("en-US"));
+const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : "–");
+export const day = (t) => (t ? new Date(t).toISOString().slice(0, 10) : "–");
+const secs = (ms) => (ms === null || ms === undefined ? "–" : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${(ms / 60_000).toFixed(1)} min`);
+
+export function card(label, value, note, tone = "") {
+  return `<div class="card ${tone}"><div class="label">${esc(label)}</div><div class="value">${esc(value)}</div>` +
+    `<div class="note">${esc(note)}</div></div>`;
+}
+
+export function table(head, rows) {
+  if (!rows.length) return `<p class="empty">Nothing recorded.</p>`;
+  return `<table><thead><tr>${head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>` +
+    rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("") + "</tbody></table>";
+}
+
+function bar(parts) {
+  const total = parts.reduce((s, p) => s + p.value, 0);
+  if (!total) return `<p class="empty">No calls recorded.</p>`;
+  return `<div class="bar">${parts.filter((p) => p.value).map((p) =>
+    `<span class="${p.cls}" style="width:${(100 * p.value) / total}%" title="${esc(p.label)}: ${p.value}"></span>`).join("")}</div>` +
+    `<div class="legend">${parts.map((p) => `<span><i class="${p.cls}"></i>${esc(p.label)} ${num(p.value)}</span>`).join("")}</div>`;
+}
+
+export function renderReport(s, { title = "Xybernetex agent report", generatedAt = new Date() } = {}) {
+  const stopped = s.gate.held + s.gate.blocked;
+  const wouldStop = s.gate.wouldHold + s.gate.wouldBlock;
+  const recs = recommendations(s);
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title>
+<style>${STYLE}</style></head><body><div class="wrap">
 <div class="brand">XYBERNETEX<b>.</b></div>
 <h1>${esc(title)}</h1>
 <div class="sub">${day(s.window.from)} to ${day(s.window.to)} · gate ${esc(s.gateConfig.mode ?? "not loaded")}` +

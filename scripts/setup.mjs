@@ -9,14 +9,14 @@
 // endpoint and, with --key, the API key (asked for, hidden), keeps any existing plugin
 // allowlist intact, and can restart the gateway and confirm the plugin loaded.
 // --dry-run prints every command without running any.
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { DEFAULT_ENDPOINT, PLUGIN_ID, describeStep, planSetup } from "../src/setup_plan.js";
+import { findOpenClaw, firstJson, runner } from "./oc.mjs";
 import { ask, askHidden } from "./prompt.mjs";
 
 const PACKAGE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -59,35 +59,13 @@ if (args.help) {
   process.exit(0);
 }
 
-// The openclaw CLI: its entry script run with this node when it's an npm
-// install (avoids Windows .cmd shims), otherwise the binary on PATH.
-function findOpenClaw() {
-  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
-    for (const name of ["openclaw.cmd", "openclaw"]) {
-      const shim = join(dir, name);
-      if (!existsSync(shim) || !statSync(shim).isFile()) continue;
-      const entry = join(dir, "node_modules", "openclaw", "openclaw.mjs");
-      if (existsSync(entry)) return [process.execPath, entry];
-      if (name === "openclaw") return [shim];
-    }
-  }
-  return null;
-}
-
 const oc = findOpenClaw();
 if (!oc) {
   console.error("openclaw isn't on PATH. Install OpenClaw first: https://openclaw.ai");
   process.exit(1);
 }
-const run = (argv, { quiet = false } = {}) => {
-  const p = spawnSync(oc[0], [...oc.slice(1), ...argv], { encoding: "utf8", windowsHide: true });
-  if (!quiet && p.status !== 0) process.stderr.write((p.stderr || p.stdout || "").slice(-1500));
-  return p;
-};
-const json = (text) => {
-  const start = text.search(/[[{]/);
-  try { return start < 0 ? null : JSON.parse(text.slice(start)); } catch { return null; }
-};
+const run = runner(oc);
+const json = firstJson;
 
 const version = run(["--version"], { quiet: true }).stdout.trim().split("\n").pop();
 console.log(`Xybernetex setup for ${version || "OpenClaw"}\n`);
