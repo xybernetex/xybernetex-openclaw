@@ -109,6 +109,9 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
   const noProgressRounds = config.noProgressRounds ?? 2;
   if (!Number.isInteger(noProgressRounds) || noProgressRounds < 1) throw new Error("contracts.noProgressRounds must be 1 or more");
   const maxSnapshotBytes = (config.maxSnapshotMb ?? 200) * 1024 * 1024;
+  // Checks are model-written commands. They run inside the session's sandbox container; on the host only
+  // when the operator opts in, since there they'd run with the gateway's own permissions.
+  const allowHost = config.allowHost === true;
   const pending = new Map();   // runKey -> { sessionKey, agentId, writing, workdirs }
   const loops = new Map();     // sessionKey -> a contract's fix loop in progress
   const ours = new Set();      // runKeys of our fix turns
@@ -185,7 +188,7 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
             { timeoutMs: (timeout + 30) * 1000 });
         };
       };
-    } else if (platform !== "win32" && hostRoot) {
+    } else if (allowHost && platform !== "win32" && hostRoot) {
       const wd = rel ? path.join(hostRoot, rel) : hostRoot;
       execForRound = () => {
         let copy = null;
@@ -197,6 +200,8 @@ export function createContracts({ config = {}, complete, workspaceDir, schedule,
           return runImpl("bash", ["-c", command], { cwd: copy, timeoutMs: (timeout + 30) * 1000 });
         };
       };
+    } else if (!allowHost) {
+      return { error: "no sandbox container for this session: checks run only in the sandbox unless contracts.allowHost is true" };
     } else {
       return { error: "no sandbox to run checks in (an unsandboxed agent on Windows)" };
     }

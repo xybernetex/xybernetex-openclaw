@@ -81,7 +81,7 @@ can't authorize a destructive action.
 before the run is judged: read-only shell commands such as
 `python3 test_totals.py` or `test -f totals.csv`. Checks that would write
 anything are refused. When the run ends they run in the session's sandbox on
-a copy of the run's folder. If they all pass, nothing more happens. If any
+a copy of the run's folder (never on the host unless you allow it). If they all pass, nothing more happens. If any
 fail, the agent gets a fix turn that names exactly which checks failed and
 why.
 
@@ -96,7 +96,19 @@ a row with no improvement.
 openclaw config set plugins.entries.xybernetex-openclaw.config.contracts.mode auto
 ```
 
-Contracts are experimental. In our tests on Cloudflare Workers AI they worked
+Checks run only in OpenClaw's sandbox (`agents.defaults.sandbox`). If your
+agents run unsandboxed, set `contracts.allowHost` to `true` to run them on a
+copy of the folder on the host instead; otherwise no contract is checked.
+
+Contracts are experimental, and in our first benchmark they hurt. On 12 hard
+tasks with two Python frameworks (same design as this plugin), the
+model-written checks often encoded a wrong expectation: they failed 13 of the 17
+correct first tries that got a contract, and the fix turns then broke 4 of
+them. The ratchet can't catch that, because it judges fixes by the same
+checks. Final success fell from 75% to 67% and from 83% to 67%. Leave
+contracts off unless you're testing them.
+
+In our tests on Cloudflare Workers AI they worked
 on short requests, but on detailed ones GLM-5.3 Flash and DeepSeek V4 Flash
 often deliberated past 32,000 tokens and wrote nothing. The plugin asks for low
 reasoning effort, which fixes this when called directly, but OpenClaw doesn't
@@ -182,6 +194,26 @@ asked for. It is a heuristic, not a sandbox, and you should know its edges:
 For untrusted work, pair it with OpenClaw's own sandboxing. Found a way past
 it? Please open an issue, or email chris@xybernetex.com if it's sensitive.
 
+## What it runs on your machine
+
+The gate itself only reads tool calls and answers allow, hold or block. The
+plugin starts other programs in three places, listed here in full:
+
+- **Setup** (`npx xybernetex-openclaw`) runs the `openclaw` command line to
+  install, enable and configure the plugin. `--dry-run` prints every command
+  without running it.
+- **Follow-up and fix turns** start a detached
+  `openclaw agent --session-key ...` process, so the turn lands in the same
+  session; OpenClaw offers plugins no other working route for this. This only
+  happens with `interventions.mode` set to `act` or with contracts on.
+- **Contract checks** (`contracts.mode` `auto`) find the session's sandbox
+  container with `docker ps` and run the checks there with `docker exec`, on a
+  copy of the run's folder. Checks that visibly write, delete, install, push
+  or use the network are refused before anything runs. With no sandbox
+  container, nothing runs, unless you set `contracts.allowHost` to `true`:
+  then the checks run with `bash` on a copy of the folder on the host, with
+  the gateway's permissions.
+
 ## Install options
 
 ```bash
@@ -228,6 +260,7 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `contracts.maxFixes` | `2` | Fix turns for a failed contract (0-5) |
 | `contracts.ratchet` | `true` | Snapshot before each fix and undo fixes that break a passing check |
 | `contracts.noProgressRounds` | `2` | Fix rounds in a row without improvement before the loop stops |
+| `contracts.allowHost` | `false` | Run checks on the host when the session has no sandbox container |
 | `contracts.model` | the run's model | Write contracts with this model ref instead; needs `llm.allowModelOverride` (see below) |
 | `contracts.agentIds` | every agent | Only these agents get contracts |
 | `governor` | off | `"standard"` or `{ maxToolCalls, maxSeconds, repeatLimit }` |

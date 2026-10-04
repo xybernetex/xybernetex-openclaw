@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.5
+
+- **Contract checks run only in the sandbox by default.** Checks are
+  model-written commands. With no sandbox container for the session they used
+  to run with `bash` on a copy of the folder on the host, with the gateway's
+  permissions; now they don't run at all unless `contracts.allowHost` is
+  `true`, and the run is judged as if contracts were off.
+- **README: contracts hurt in our first benchmark.** Model-written checks
+  often expected the wrong thing, failed correct work, and the fix turns
+  then broke it. Keep contracts off unless you're testing them.
+- **Known issue: a contract can be cut off by a fast run.** The contract is
+  written while the agent works; if the run ends first, OpenClaw closes the
+  plugin's model access mid-call ("Async work scope is closed") and the run
+  is judged as if contracts were off.
+- **README: what it runs on your machine.** Every program the plugin starts,
+  when, and why.
+
 ## 0.4.4
 
 - **Renamed to Xybernetex Supervisor** (was Xybernetex Safety Gate): it now

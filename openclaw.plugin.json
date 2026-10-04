@@ -30,6 +30,7 @@
           "maxFixes": { "type": "integer", "minimum": 0, "maximum": 5, "default": 2, "description": "Fix turns for a failed contract." },
           "ratchet": { "type": "boolean", "default": true, "description": "Snapshot the run's folder before each fix turn and undo fixes that break a passing check." },
           "maxSnapshotMb": { "type": "integer", "minimum": 1, "maximum": 4096, "default": 200, "description": "Run folders larger than this get no ratchet." },
+          "allowHost": { "type": "boolean", "default": false, "description": "Run checks on the host (on a copy of the run's folder) when the session has no sandbox container. Off by default: checks are model-written commands, and on the host they run with the gateway's permissions." },
           "model": { "type": "string", "minLength": 1, "description": "A model ref to write contracts with instead of the run's own, e.g. one that doesn't deliberate at length. Needs plugins.entries.xybernetex-openclaw.llm.allowModelOverride; falls back to the run's model if refused." },
           "noProgressRounds": { "type": "integer", "minimum": 1, "maximum": 5, "default": 2, "description": "Fix rounds in a row without improvement before the loop stops." }
         }

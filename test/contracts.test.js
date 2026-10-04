@@ -79,7 +79,7 @@ test("verdicts, the failure message and the ratchet's judge", async () => {
 
 // A pretend OpenClaw: the agent's workspace is a real folder; "docker exec" runs our
 // checks against it (test -f / grep -q), like the sandbox that mounts it at /workspace.
-function world({ sandbox = "sbx-1", platform = "linux", contract = null, completeFails = 0 } = {}) {
+function world({ sandbox = "sbx-1", platform = "linux", contract = null, completeFails = 0, allowHost = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "xyb-contracts-"));
   const runDir = join(root, "runs", "t1");
   mkdirSync(runDir, { recursive: true });
@@ -102,7 +102,7 @@ function world({ sandbox = "sbx-1", platform = "linux", contract = null, complet
     return { code: 0, output: "" };
   };
   const contracts = createContracts({
-    config: { mode: "auto", maxFixes: 2 },
+    config: { mode: "auto", maxFixes: 2, allowHost },
     complete: async (params) => {
       calls.complete.push(params);
       if (fails > 0 && params.agentId) { fails -= 1; const e = new Error("not allowed"); e.code = "unauthorized"; throw e; }
@@ -347,4 +347,23 @@ test("contracts.model writes the contract; a refused override falls back to the 
     assert.deepEqual(who, want);
     assert.equal(logs.find((e) => e.type === "contract").writer, refuse ? "agent" : "model");
   }
+});
+
+test("without a sandbox, checks don't run on the host unless contracts.allowHost is set", async () => {
+  const off = world({ sandbox: null });
+  try {
+    off.file("keep.txt", "k"); off.file("made.txt", "hi");
+    off.start("r1");
+    assert.equal(await off.contracts.onRunEnd("r1", off.ctx, { success: true, toolCalls: 1 }, null), null);
+    assert.match(off.logs.find((e) => e.type === "contract_unavailable").reason, /only in the sandbox unless contracts\.allowHost/);
+    assert.ok(!off.calls.exec.some((a) => a[0] === "bash"));
+  } finally { off.done(); }
+  const on = world({ sandbox: null, allowHost: true });
+  try {
+    on.file("keep.txt", "k"); on.file("made.txt", "hi");
+    on.start("r1");
+    await on.contracts.onRunEnd("r1", on.ctx, { success: true, toolCalls: 1 }, null);
+    assert.ok(on.logs.some((e) => e.type === "contract_check"));
+    assert.ok(on.calls.exec.some((a) => a[0] === "bash"));
+  } finally { on.done(); }
 });

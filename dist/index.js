@@ -29,7 +29,7 @@ const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jso
                                                                                                                  
                                                      
                                                                                                                          
-                                                
+                                                                     
                                                                                                
              
                                  
@@ -119,7 +119,7 @@ export default {
           workspaceDir: (agentId        ) => {
             try { return agentRuntime.resolveAgentWorkspaceDir(api.runtime?.config?.current?.(), agentId) ?? null; } catch { return null; }
           } });
-        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, maxFixes: config.contracts.maxFixes ?? 2,
+        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, allowHost: config.contracts.allowHost === true, maxFixes: config.contracts.maxFixes ?? 2,
           ratchet: config.contracts.ratchet !== false });
       }
     }

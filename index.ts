@@ -28,7 +28,7 @@ type Config = {
   interventions?: { mode?: "observe" | "act"; agentIds?: string[]; verifyRate?: number; policy?: "remote" | "v0";
     shareOutcomes?: boolean; quietMinutes?: number };
   contracts?: { mode?: "off" | "auto"; agentIds?: string[]; maxFixes?: number; ratchet?: boolean; maxSnapshotMb?: number;
-    noProgressRounds?: number; model?: string };
+    noProgressRounds?: number; model?: string; allowHost?: boolean };
   governor?: "standard" | { maxToolCalls?: number; maxSeconds?: number; repeatLimit?: number };
   control?: {
     mode?: "observe" | "enforce";
@@ -118,7 +118,7 @@ export default {
           workspaceDir: (agentId: string) => {
             try { return agentRuntime.resolveAgentWorkspaceDir(api.runtime?.config?.current?.(), agentId) ?? null; } catch { return null; }
           } });
-        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, maxFixes: config.contracts.maxFixes ?? 2,
+        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, allowHost: config.contracts.allowHost === true, maxFixes: config.contracts.maxFixes ?? 2,
           ratchet: config.contracts.ratchet !== false });
       }
     }
