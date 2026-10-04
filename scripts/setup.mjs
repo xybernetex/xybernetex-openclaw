@@ -6,7 +6,7 @@
 //   node scripts/setup.mjs --mode enforce --preset strict
 //
 // Installs and enables the plugin, sets the gate preset and mode, the policy
-// endpoint and (asked for, hidden) the API key, keeps any existing plugin
+// endpoint and, with --key, the API key (asked for, hidden), keeps any existing plugin
 // allowlist intact, and can restart the gateway and confirm the plugin loaded.
 // --dry-run prints every command without running any.
 import { spawnSync } from "node:child_process";
@@ -31,7 +31,8 @@ const { values: args } = parseArgs({ options: {
   endpoint: { type: "string", default: DEFAULT_ENDPOINT },
   source: { type: "string", default: PACKAGE_ROOT },
   reinstall: { type: "boolean", default: false },
-  "no-key": { type: "boolean", default: false },
+  key: { type: "boolean", default: false },
+  "no-key": { type: "boolean", default: false },   // the default since 0.4.6; still accepted
   restart: { type: "boolean", default: false },
   "dry-run": { type: "boolean", default: false },
   yes: { type: "boolean", short: "y", default: false },
@@ -50,7 +51,8 @@ if (args.help) {
   --endpoint URL                  policy endpoint (default ${DEFAULT_ENDPOINT})
   --source PATH|SPEC              where to install the plugin from (default: this package)
   --reinstall                     reinstall even if already installed
-  --no-key                        don't ask for an API key (local gate and report only)
+  --key                           ask for an API key for the optional policy service (default: no key;
+                                  everything runs locally)
   --restart                       restart the gateway and confirm the plugin loaded
   --yes, -y                       confirm installing from outside ClawHub without asking
   --dry-run                       print the commands, run nothing`);
@@ -96,18 +98,19 @@ const allowed = json(run(["config", "get", "plugins.allow", "--json"], { quiet: 
 const state = { installed, allow: Array.isArray(allowed) ? allowed : null };
 
 let apiKey = null;
-if (!args["no-key"] && !args["dry-run"]) {
-  if (process.env.XYBERNETEX_API_KEY) {
-    console.log("Using the API key in XYBERNETEX_API_KEY (it takes precedence at runtime; not written to config).\n");
-  } else {
-    // Checked here so a mangled paste never gets written into the config.
-    for (;;) {
-      apiKey = await askHidden("Xybernetex API key (from app.xybernetex.com; Enter to skip): ");
-      if (!apiKey || /^xyb_[0-9A-Za-z]{32}$/.test(apiKey)) break;
-      console.log(`  That isn't a Xybernetex key ("xyb_" + 32 letters and digits; got ${apiKey.length} characters). Paste it again.`);
-    }
-    if (!apiKey) console.log("No key: the safety gate and the report still work; policy decisions stay off.\n");
+if (process.env.XYBERNETEX_API_KEY && !args["dry-run"]) {
+  console.log("Using the API key in XYBERNETEX_API_KEY (it takes precedence at runtime; not written to config).\n");
+} else if (!args.key || args["no-key"]) {
+  if (!args["dry-run"]) console.log("No API key needed: the gate, governor, follow-ups and report run locally. " +
+    "(--key adds one for the optional policy service.)\n");
+} else if (!args["dry-run"]) {
+  // Checked here so a mangled paste never gets written into the config.
+  for (;;) {
+    apiKey = await askHidden("Xybernetex API key (from app.xybernetex.com; Enter to skip): ");
+    if (!apiKey || /^xyb_[0-9A-Za-z]{32}$/.test(apiKey)) break;
+    console.log(`  That isn't a Xybernetex key ("xyb_" + 32 letters and digits; got ${apiKey.length} characters). Paste it again.`);
   }
+  if (!apiKey) console.log("No key: everything still runs locally; the policy service stays off.\n");
 }
 
 // OpenClaw's own consent step for plugins that don't come from ClawHub.

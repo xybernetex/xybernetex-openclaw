@@ -16,6 +16,7 @@ import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunE
 import { createOutcomeSender, createOutcomeTracker } from "../src/outcomes.js";
 import { createContracts } from "../src/contract_runner.js";
 import { createGovernor, limitsFrom } from "../src/governor.js";
+import { loggedRecently } from "../src/logfile.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -57,6 +58,10 @@ export default {
         // best-effort: logging must never break the agent
       }
     };
+    // Startup lines: once per gateway start, though OpenClaw registers the plugin more than once.
+    const writeReady = (entry                         ) => {
+      if (!loggedRecently(logPath, entry)) writeLog(entry);
+    };
 
     const apiKey = process.env.XYBERNETEX_API_KEY ?? config.apiKey;
     const authz = createAuthorizationTracker();
@@ -92,7 +97,7 @@ export default {
       const share = config.interventions.shareOutcomes !== false && Boolean(config.endpoint && apiKey);
       outcomes = createOutcomeTracker({ log: writeLog, quietMs: quietMinutes * 60_000,
         send: share ? createOutcomeSender({ endpoint: config.endpoint, apiKey }) : null });
-      writeLog({ type: "interventions_ready", mode: config.interventions.mode ?? "observe", policy: remote ? "remote" : "v0",
+      writeReady({ type: "interventions_ready", mode: config.interventions.mode ?? "observe", policy: remote ? "remote" : "v0",
         agentIds: config.interventions.agentIds ?? null, verifyRate: config.interventions.verifyRate ?? 1,
         shareOutcomes: share });
     }
@@ -101,7 +106,7 @@ export default {
     // a tool-call or time budget, the same call over and over. Off unless configured.
     const limits = limitsFrom(config.governor);
     const governor = limits ? createGovernor(limits, { log: writeLog }) : null;
-    if (governor) writeLog({ type: "governor_ready", ...limits });
+    if (governor) writeReady({ type: "governor_ready", ...limits });
 
     // Contracts (src/contract_runner.js): the run's model writes acceptance
     // checks from the request; when the run ends they run in the session's
@@ -119,7 +124,7 @@ export default {
           workspaceDir: (agentId        ) => {
             try { return agentRuntime.resolveAgentWorkspaceDir(api.runtime?.config?.current?.(), agentId) ?? null; } catch { return null; }
           } });
-        writeLog({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, allowHost: config.contracts.allowHost === true, maxFixes: config.contracts.maxFixes ?? 2,
+        writeReady({ type: "contracts_ready", agentIds: config.contracts.agentIds ?? null, allowHost: config.contracts.allowHost === true, maxFixes: config.contracts.maxFixes ?? 2,
           ratchet: config.contracts.ratchet !== false });
       }
     }
@@ -165,13 +170,14 @@ export default {
       if (stop) return { block: true, blockReason: stop };
       return gate(event, ctx);
     }, { priority: 100 });
-    writeLog({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
+    writeReady({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
       preset: config.control?.preset ?? "none", ruleIds: gate.ruleIds });
 
     // The key can come from the environment so it stays out of openclaw.json.
+    // No key is a normal, supported setup: everything runs locally. Logged as information, not an error.
     if (!config.endpoint || !apiKey) {
-      writeLog({ error: "xybernetex-openclaw remote observation disabled: set plugin config `endpoint` and XYBERNETEX_API_KEY " +
-                        "(or plugin config `apiKey`) - see README" });
+      writeReady({ type: "policy_service_off", reason: "no API key: the gate, governor, follow-ups and report run " +
+        "locally; set XYBERNETEX_API_KEY and plugin config `endpoint` to use the policy service" });
     }
 
     // One supervised trajectory = one agent run (a single user turn and all
@@ -217,7 +223,7 @@ export default {
       const verify = createFinalizeVerifier({ ...config.verifyBeforeFinish, runKeyOf, log: writeLog,
         toolCallsFor: (runKey        ) => supervisor.toolCalls(runKey) });
       api.on("before_agent_finalize", (event     , ctx     ) => verify(event, ctx));
-      writeLog({ type: "verify_ready", agentIds: config.verifyBeforeFinish.agentIds });
+      writeReady({ type: "verify_ready", agentIds: config.verifyBeforeFinish.agentIds });
     }
 
     // Authorization context is per session, not per run: a later turn can

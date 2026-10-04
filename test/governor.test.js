@@ -103,3 +103,27 @@ test("contract fix rounds stop after noProgressRounds without improvement", asyn
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("startup lines are written once though OpenClaw registers the plugin twice; no key is not an error", async () => {
+  const { loggedRecently } = await import("../src/logfile.js");
+  const dir = mkdtempSync(join(tmpdir(), "xybernetex-ready-"));
+  try {
+    const logPath = join(dir, "events.jsonl");
+    const register = () => plugin.register({ pluginConfig: { logPath, governor: "standard" }, on: () => {} });
+    register();
+    register();
+    const logs = readFileSync(logPath, "utf8").trim().split("\n").map(JSON.parse);
+    const count = (type) => logs.filter((e) => e.type === type).length;
+    assert.equal(count("governor_ready"), 1);
+    assert.equal(count("tool_gate_ready"), 1);
+    assert.equal(count("policy_service_off"), 1);
+    assert.ok(!logs.some((e) => "error" in e), "no error entries without a key");
+    // A different entry, or the same one long after, is written.
+    assert.equal(loggedRecently(logPath, { type: "governor_ready", other: 1 }), false);
+    assert.equal(loggedRecently(logPath, logs.find((e) => e.type === "governor_ready") && (({ ts, ...r }) => r)(logs.find((e) => e.type === "governor_ready"))), true);
+    assert.equal(loggedRecently(logPath, (({ ts, ...r }) => r)(logs.find((e) => e.type === "governor_ready")), 120_000, Date.now() + 10 * 60_000), false);
+    assert.equal(loggedRecently(join(dir, "missing.jsonl"), { type: "x" }), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

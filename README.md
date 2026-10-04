@@ -221,7 +221,7 @@ npx xybernetex-openclaw --restart                  # recommended preset, observe
 npx xybernetex-openclaw --mode enforce --preset strict
 npx xybernetex-openclaw --interventions act        # retry and check-your-work turns on
 npx xybernetex-openclaw --interventions off        # no follow-ups, not even logged
-npx xybernetex-openclaw --no-key                   # local gate and report only
+npx xybernetex-openclaw --key                      # also ask for an API key (optional policy service)
 npx xybernetex-openclaw --dry-run                  # print every command, change nothing
 npx xybernetex-openclaw report --days 30          # the report, for the last 30 days
 ```
@@ -234,7 +234,8 @@ Setup does the following:
 - Grants the conversation access that authorization labels need.
 - If you have a plugin allowlist, adds this plugin to it and keeps your existing
   entries.
-- Asks for your API key without echoing it.
+- With `--key`, asks for your API key without echoing it. Without it, nothing
+  is asked and everything runs locally.
 
 Requires OpenClaw 2026.3.22 or later (verified on 2026.9.6) and Node 20+.
 

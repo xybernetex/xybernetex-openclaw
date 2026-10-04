@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.6
+
+- **Setup no longer asks for an API key.** Everything runs locally without
+  one; `--key` asks for a key for the optional policy service. `--no-key` is
+  still accepted.
+- **No key isn't logged as an error.** The log gets one `policy_service_off`
+  line saying everything runs locally, in place of an error entry.
+- **Startup lines are written once.** OpenClaw registers the plugin more than
+  once while a gateway starts, so each `*_ready` line appeared two or three
+  times; an identical line written in the last two minutes is now skipped.
+
 ## 0.4.5
 
 - **Contract checks run only in the sandbox by default.** Checks are
