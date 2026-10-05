@@ -1,6 +1,6 @@
 {
   "name": "xybernetex-openclaw",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Xybernetex Supervisor for OpenClaw: holds destructive actions nobody asked for, checks the agent's work against acceptance checks (experimental), undoes fixes that break what worked, and stops runaway runs. Runs locally, MIT, no account needed.",
   "license": "MIT",
   "author": "Xybernetex Systems LLC <chris@xybernetex.com>",

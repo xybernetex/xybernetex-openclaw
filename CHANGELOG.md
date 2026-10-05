@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.3
+
+- **The reviewer (opt-in, `reviewer.mode: "on"`).** Before a held call waits
+  for a person, a model reads only the user's own messages and the call, and
+  approves it when the user clearly asked for it in other words; otherwise
+  the approval prompt carries its reason. A call that repeats a command the
+  agent read in a file or tool output is never reviewed (a deterministic echo
+  check); planted deletes stay blocked before review; slow, failing or
+  unreadable answers mean a person decides. Replayed over 589 held calls from
+  real history: 41% of ordinary held calls approved, 1 of 217 injection-
+  scenario calls (one the user had asked for).
+
 ## 0.5.2
 
 - **`npx xybernetex-openclaw timeline`**, the flight recorder: a session as

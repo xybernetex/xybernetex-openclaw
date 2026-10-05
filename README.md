@@ -84,6 +84,21 @@ prompt-injected file gets held.
 
 Requested actions always run without a prompt. Your own rules layer on top.
 
+**A second opinion before it asks you (opt-in).** A held call normally waits
+for you. With the reviewer on, a model first reads your own messages in the
+session and the call, and approves it when you clearly asked for it in other
+words ("clean up the temp files" covers `rm -rf tmp/`); otherwise it passes
+the call to you with its reason. It never sees files, web pages or tool
+output, and a call that repeats a command the agent read there is never
+reviewed at all, since that instruction didn't come from you. Replayed over
+589 held calls from our own history: it approved 41% of ordinary held calls
+(the approvals you'd no longer click through) and 1 of 217 calls from
+injection scenarios, one the user had in fact asked for.
+
+```bash
+openclaw config set plugins.entries.xybernetex-openclaw.config.reviewer.mode on
+```
+
 **Starts in observe mode.** It logs what it *would* hold or block and stops
 nothing. When the report looks right, switch to enforce:
 
@@ -324,6 +339,7 @@ All under `plugins.entries.xybernetex-openclaw.config`:
 | `contracts.allowHost` | `false` | Run checks on the host when the session has no sandbox container |
 | `contracts.model` | the run's model | Write contracts with this model ref instead; needs `llm.allowModelOverride` (see below) |
 | `contracts.agentIds` | every agent | Only these agents get contracts |
+| `reviewer.mode` | `off` | `on`: a model approves held calls you clearly asked for, else passes them to you with its reason |
 | `undo.mode` | `on` | Journal files before calls change them, for `npx xybernetex-openclaw undo` |
 | `undo.maxRunMb` / `undo.keepRuns` | `200` / `20` | Most one run may copy aside; how many runs stay undoable |
 | `governor` | off | `"standard"` or `{ maxToolCalls, maxSeconds, repeatLimit }` |
