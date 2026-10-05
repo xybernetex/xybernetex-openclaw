@@ -8,7 +8,7 @@
 // What's there now is moved to <journal>/.trash/<time>/ first, so an undo can be undone by hand.
 import { parseArgs } from "node:util";
 
-import { DEFAULT_UNDO_DIR, laterConflicts, listRuns, undoRun } from "../src/undo.js";
+import { DEFAULT_UNDO_DIR, lastChange, laterConflicts, listRuns, undoRun } from "../src/undo.js";
 import { ask } from "./prompt.mjs";
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -53,7 +53,8 @@ const run = positionals[0]
     }
     return hits[0];
   })()
-  : runs.find((r) => !r.undoneAt);
+  // The run whose latest change is the most recent, so overlapping runs undo in the order their changes happened.
+  : runs.filter((r) => !r.undoneAt).sort((a, b) => lastChange(b).localeCompare(lastChange(a)))[0];
 if (!run) {
   console.log("Every recent run is already undone. See --list.");
   process.exit(0);
@@ -72,8 +73,10 @@ if (run.skipped?.length) {
 }
 const conflicts = laterConflicts(run, runs);
 if (conflicts.length && !args.force) {
-  console.log(`\nA later run also changed ${[...new Set(conflicts.map((c) => c.rel))].slice(0, 5).join(", ")}; undoing this one would ` +
-    "overwrite that work. Undo the later run first, or pass --force.");
+  const blockers = [...new Set(conflicts.map((c) => c.run))];
+  console.log(`\nAnother run changed ${[...new Set(conflicts.map((c) => c.rel))].slice(0, 5).join(", ")} after this one did; undoing ` +
+    `this one first would overwrite that work. Undo ${blockers.length > 1 ? "these runs" : "that run"} first, or pass --force:` +
+    blockers.map((id) => `\n  npx xybernetex-openclaw undo ${id}`).join(""));
   process.exit(1);
 }
 if (!args.yes && !/^y(es)?$/i.test(await ask("\nRestore these? What's there now is kept in the journal's trash. [y/N] "))) {

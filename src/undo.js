@@ -192,11 +192,20 @@ export function listRuns(root = DEFAULT_UNDO_DIR) {
   return out.sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
 }
 
-// Paths a later run also touched: undoing this one would overwrite that run's work.
+// When a run last changed anything (its newest entry), for picking which run to undo first.
+export function lastChange(run) {
+  return run.entries.reduce((m, e) => (String(e.at ?? "") > m ? String(e.at) : m), String(run.startedAt ?? ""));
+}
+
+// Paths another run changed AFTER this run did: undoing this one would overwrite that run's work.
+// Ordered by when each path was touched, not by when the runs started: an interactive run that
+// starts first can touch a file after an overlapping cron job already deleted it (found live,
+// 2026-10-05: ordering by start time undid the two in the wrong order and lost the file).
 export function laterConflicts(run, all) {
-  const mine = new Set(run.entries.map((e) => e.rel));
-  return all.filter((r) => r.workspace === run.workspace && String(r.startedAt) > String(run.startedAt) && !r.undoneAt)
-    .flatMap((r) => r.entries.filter((e) => mine.has(e.rel)).map((e) => ({ run: r.id, rel: e.rel })));
+  const mine = new Map(run.entries.map((e) => [e.rel, String(e.at ?? run.startedAt)]));
+  return all.filter((r) => r.id !== run.id && r.workspace === run.workspace && !r.undoneAt)
+    .flatMap((r) => r.entries.filter((e) => mine.has(e.rel) && String(e.at ?? r.startedAt) > mine.get(e.rel))
+      .map((e) => ({ run: r.id, rel: e.rel })));
 }
 
 // Puts a run's files back. What's there now goes to <root>/.trash/<stamp>/ first, so the undo can be undone.

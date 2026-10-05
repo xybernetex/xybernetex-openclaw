@@ -120,3 +120,31 @@ test("in the plugin, a call the gate lets through is journaled; a blocked one is
     assert.match(logs, /"undo_saved"/);
   } finally { w.done(); }
 });
+
+test("overlapping runs: undo follows the order files were touched, not the order runs started", async () => {
+  // Found live 2026-10-05: an interactive run started first and paused; a one-shot run started later, deleted
+  // notes.txt, and the interactive run then rewrote it. Ordering by run start undid them in the wrong order.
+  const { lastChange } = await import("../src/undo.js");
+  const w = world();
+  try {
+    const j = w.journal();
+    j.noteRunStart("A", { agentId: "main" }, "interactive");   // starts first
+    j.noteRunStart("B", { agentId: "main" }, "cron");          // starts second...
+    j.beforeCall("B", "exec", { command: "rm notes.txt" });    // ...but touches the file first
+    rmSync(join(w.ws, "notes.txt"));
+    j.beforeCall("A", "write", { path: "notes.txt" });         // A recreates it afterwards
+    writeFileSync(join(w.ws, "notes.txt"), "rewritten by A");
+    j.endRun("B");
+    j.endRun("A");
+    const runs = listRuns(w.root);
+    const A = runs.find((r) => r.prompt === "interactive");
+    const B = runs.find((r) => r.prompt === "cron");
+    assert.deepEqual(laterConflicts(B, runs).map((c) => [c.rel, c.run]), [["notes.txt", A.id]]);  // A changed it after B
+    assert.deepEqual(laterConflicts(A, runs), []);
+    assert.ok(lastChange(A) > lastChange(B));   // so A is what a bare `undo` picks first
+    undoRun(A);
+    assert.ok(!existsSync(join(w.ws, "notes.txt")));            // back to B's state: deleted
+    undoRun(B);
+    assert.equal(readFileSync(join(w.ws, "notes.txt"), "utf8"), "original notes");
+  } finally { w.done(); }
+});

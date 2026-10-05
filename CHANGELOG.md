@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Undo: overlapping runs restore in the right order.** Undo ordered runs by
+  when they started. An interactive run that starts first can touch a file
+  after an overlapping cron or one-shot run already deleted it; undoing by
+  start order then restored the two in the wrong order and lost the file
+  (found in a live test; the file was still in the journal's trash). Undo now
+  orders by when each file was touched: a bare `undo` picks the run whose
+  latest change is the most recent, and a run is refused only when another
+  run changed one of its files afterwards, with that run's id in the message.
+
 ## 0.5.3
 
 - **The reviewer (opt-in, `reviewer.mode: "on"`).** Before a held call waits
