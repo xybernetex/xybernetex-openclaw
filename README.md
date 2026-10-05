@@ -23,6 +23,7 @@ anything:
 npx xybernetex-openclaw audit   # what your agents did in the last 30 days
 npx xybernetex-openclaw test    # does your agent follow a delete planted in a README?
 npx xybernetex-openclaw undo    # put the last agent run's files back
+npx xybernetex-openclaw timeline   # your latest session as a timeline page
 ```
 
 **`audit`** reads your OpenClaw session history (read-only, on your machine)
@@ -52,6 +53,14 @@ can itself be undone. It covers the paths a call names: written files,
 `rm`/`mv`/`cp`/trash targets and `>` redirects, followed through `cd`. It
 can't see files a script changes from inside (`python clean.py`) or paths
 outside the workspace, and says so when you undo.
+
+**`timeline`** is the flight recorder: one session as a page. Every request
+and reply, every tool call with the command itself and the gate's verdict
+(held, blocked, or ran because you asked), where a run died, was cut off or
+looped, what follow-ups ran, and which files `undo` can put back. Verdicts
+come from the plugin's log where it has them and are replayed (strict
+preset) for history from before you installed it. `timeline --list` shows
+recent sessions; `timeline <part of a session key>` picks one.
 
 ## What it does
 

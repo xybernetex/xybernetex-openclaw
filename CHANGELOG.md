@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.5.2
+
+- **`npx xybernetex-openclaw timeline`**, the flight recorder: a session as
+  one page - requests, replies, every tool call with the gate's verdict (live
+  from the log, or replayed for older history), deaths, cut-offs and loops,
+  follow-ups, and the files `undo` can restore.
 
 - **Escalate follow-ups to a stronger model.** `interventions.escalate.retry`
   (and `.verify`) names the model a follow-up turn runs on. On our benchmark

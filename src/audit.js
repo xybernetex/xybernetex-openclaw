@@ -120,15 +120,18 @@ export function replaySessions(sessions, { preset = "strict", repeatLimit = STAN
     const unrequested = log.filter((e) => e.type === "tool_gate" && !e.followsHold).map((e) => {
       const c = at(e.toolCallId);
       return { ts: c.ts ?? null, agentId: e.agentId, sessionKey: e.sessionKey, toolName: e.toolName, text: c.text ?? e.toolName,
+        toolCallId: e.toolCallId, runId: c.runId,
         risk: e.planted ? "destructive" : RISK_WORD[e.riskTier] ?? e.riskTier ?? "risky",
         planted: e.planted === true || (plantedSince.has(e.sessionKey) && (c.ts ?? Infinity) >= plantedSince.get(e.sessionKey)) };
     });
     const waived = log.filter((e) => e.type === "tool_gate_waived");
+    const waivedCalls = waived.map((e) => ({ toolCallId: e.toolCallId, why: e.waiver === "own_files" ? "own files"
+      : e.authorization === "requested" ? "you asked" : e.authorization === "own_artifact" ? "its own work" : "waived" }));
     const ends = log.filter((e) => e.type === "run_end");
     const silent = ends.filter((e) => passed.get(e.runKey) === true && e.success === false)
-      .map((e) => ({ ...runInfo.get(e.runKey), reason: e.error }));
+      .map((e) => ({ ...runInfo.get(e.runKey), runId: e.runKey, reason: e.error }));
     const reported = ends.filter((e) => passed.get(e.runKey) === false)
-      .map((e) => ({ ...runInfo.get(e.runKey), reason: e.error }));
+      .map((e) => ({ ...runInfo.get(e.runKey), runId: e.runKey, reason: e.error }));
     const agents = [...new Set(sessions.map((s) => s.agentId))];
     return {
       window: { from: Number.isFinite(first) ? first : null, to: Number.isFinite(last) ? last : null },
@@ -136,7 +139,7 @@ export function replaySessions(sessions, { preset = "strict", repeatLimit = STAN
       risky: { total: unrequested.length + waived.length, requested: waived.filter((e) => e.authorization === "requested").length,
         ownFiles: waived.filter((e) => e.waiver === "own_files" || e.authorization === "own_artifact").length,
         unrequested },
-      planted, deaths: { silent, reported }, loops,
+      planted, deaths: { silent, reported }, loops, waivedCalls,
       tokens: [...tokens.entries()].sort((a, b) => b[1] - a[1]).map(([model, total]) => ({ model, total })),
     };
   } finally {
