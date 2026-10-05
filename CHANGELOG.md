@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.4
 
 - **Undo: overlapping runs restore in the right order.** Undo ordered runs by
   when they started. An interactive run that starts first can touch a file
