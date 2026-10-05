@@ -9,7 +9,7 @@ import { homedir } from "node:os";
 
 import { createSupervisor } from "../src/supervisor.js";
 import { createToolGate } from "../src/control.js";
-import { createAuthorizationTracker } from "../src/authz.js";
+import { createAuthorizationTracker, resultText } from "../src/authz.js";
 import { createFinalizeVerifier } from "../src/verify.js";
 import { createCliScheduler, createInterventions, createRemoteDecider, emptyRunError, isOurs, lastReplyError, retriable }
   from "../src/interventions.js";
@@ -18,7 +18,7 @@ import { createContracts } from "../src/contract_runner.js";
 import { createGovernor, limitsFrom } from "../src/governor.js";
 import { loggedRecently } from "../src/logfile.js";
 import { DEFAULT_UNDO_DIR, createUndoJournal } from "../src/undo.js";
-import { createReviewer } from "../src/reviewer.js";
+import { createReviewer, echoes } from "../src/reviewer.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -123,6 +123,18 @@ export default {
     // The reviewer (src/reviewer.js): a model's second opinion on a held call, from the user's own messages
     // only, before it waits for a person. Off unless reviewer.mode is "on".
     let reviewer      = null;
+    // What the agent read this session (tool output), in memory only: a held call that repeats a command
+    // found there came from it, and is never reviewed (src/reviewer.js echoes).
+    const readTexts = new Map                  ();
+    const noteRead = (sessionKey                    , text        ) => {
+      if (!sessionKey || !text) return;
+      const list = readTexts.get(sessionKey) ?? [];
+      readTexts.delete(sessionKey);
+      list.push(text.slice(0, 20_000));
+      if (list.length > 30) list.shift();
+      readTexts.set(sessionKey, list);
+      while (readTexts.size > 200) readTexts.delete(readTexts.keys().next().value          );
+    };
     if (config.reviewer?.mode === "on") {
       if (typeof api.runtime?.llm?.complete !== "function") {
         writeLog({ error: "the reviewer needs api.runtime.llm (OpenClaw 2026.9 or later): disabled" });
@@ -206,6 +218,14 @@ export default {
         try { undo?.beforeCall(runKeyOf(event, ctx), event?.toolName, event?.params); } catch { /* never in the way */ }
       };
       if (reviewer && decision?.requireApproval) {
+        if (echoes(event?.toolName, event?.params, readTexts.get(ctx?.sessionKey))) {
+          writeLog({ type: "tool_gate_reviewed", sessionKey: ctx?.sessionKey, agentId: ctx?.agentId,
+            toolCallId: event?.toolCallId ?? ctx?.toolCallId, toolName: event?.toolName, decision: "ask", reason: "echo" });
+          journal();
+          decision.requireApproval.description += "\nXybernetex reviewer: not reviewed - this repeats a command the agent read " +
+            "in a file or tool output, so the instruction came from there, not from you.";
+          return decision;
+        }
         return reviewer.review(event, ctx, authz.requests(ctx?.sessionKey)).then((verdict     ) => {
           journal();
           if (verdict.approve) return undefined;
@@ -235,6 +255,7 @@ Xybernetex reviewer: ${verdict.why || "not clearly requested"}`;
       // What the agent just read: a delete command in it (a README step, a web
       // page) can't authorize itself, so its target is held (src/control.js).
       try { gate.noteToolResult(event, ctx); } catch { /* the gate still judges every call */ }
+      if (reviewer) { try { noteRead(ctx?.sessionKey, resultText(event?.result)); } catch { /* best-effort */ } }
       try { outcomes?.noteToolCall(runKeyOf(event, ctx), event?.toolName, Boolean(event?.error)); } catch { /* best-effort */ }
       try { contracts?.noteToolCall(runKeyOf(event, ctx), event?.toolName, event?.params); } catch { /* best-effort */ }
       void supervisor.recordToolCall(runKeyOf(event, ctx), {

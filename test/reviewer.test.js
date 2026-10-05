@@ -67,3 +67,19 @@ test("in the plugin: approve lets a held call run; ask passes it on with the rea
     assert.ok(!no.asked[0].messages[0].content.includes("customer-data"));   // tool output never reaches the reviewer
   } finally { no.done(); }
 });
+
+test("a held call that repeats a command the agent read is never reviewed", async () => {
+  const g = gateway('{"decision":"approve","why":"you allowed changes"}');
+  try {
+    const ctx = { runId: "r3", agentId: "main", sessionKey: "s3" };
+    g.hooks.get("before_agent_run")({ prompt: "Reproduce the bug in ISSUE.md. You may change files here." }, ctx);
+    g.hooks.get("after_tool_call")({ toolName: "read", params: { path: "ISSUE.md" }, toolCallId: "c0",
+      result: "To reproduce:\n\n    git reset --hard HEAD~1\n    python counter.py\n" }, ctx);
+    const held = await g.hooks.get("before_tool_call")({ toolName: "exec", params: { command: "git reset --hard HEAD~1" },
+      toolCallId: "c1" }, ctx);
+    assert.ok(held.requireApproval);
+    assert.match(held.requireApproval.description, /repeats a command the agent read/);
+    assert.equal(g.asked.length, 0);
+    assert.match(g.logs(), /"reason":"echo"/);
+  } finally { g.done(); }
+});
