@@ -550,6 +550,10 @@ export function createAuthorizationTracker({ maxSessions = 200, requestsKept = 3
       const labels = (ops.length ? ops : [{ kind: "generic", targets: [] }]).map((op) => judge(op, s));
       return labels.reduce((a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a));
     },
+    // The user's own recent turns (oldest first), for the reviewer (src/reviewer.js). Never tool output.
+    requests(sessionKey) {
+      return [...(sessions.get(sessionKey)?.requests ?? [])];
+    },
     // Whether the user's own turns name this target with a delete or move
     // verb in one sentence - what lets a held target be touched after all.
     requestsTarget(sessionKey, target) {

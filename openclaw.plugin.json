@@ -35,6 +35,16 @@
           "noProgressRounds": { "type": "integer", "minimum": 1, "maximum": 5, "default": 2, "description": "Fix rounds in a row without improvement before the loop stops." }
         }
       },
+      "reviewer": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "A model's second opinion on a held call before it waits for a person: it sees only the user's own messages and the call, approves it when the user clearly asked for it, and otherwise passes it on with its reason. Never reviews a planted delete. Off by default.",
+        "properties": {
+          "mode": { "type": "string", "enum": ["off", "on"], "default": "off" },
+          "model": { "type": "string", "minLength": 1, "description": "Model ref for the reviewer (needs llm.allowModelOverride); default the agent's own model." },
+          "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 120000, "default": 20000, "description": "No answer in time means a person decides." }
+        }
+      },
       "undo": {
         "type": "object",
         "additionalProperties": false,

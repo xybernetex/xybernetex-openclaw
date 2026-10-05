@@ -17,6 +17,7 @@ import { createContracts } from "./src/contract_runner.js";
 import { createGovernor, limitsFrom } from "./src/governor.js";
 import { loggedRecently } from "./src/logfile.js";
 import { DEFAULT_UNDO_DIR, createUndoJournal } from "./src/undo.js";
+import { createReviewer } from "./src/reviewer.js";
 
 const DEFAULT_LOG_PATH = join(homedir(), ".openclaw", "xybernetex-supervisor.jsonl");
 
@@ -33,6 +34,7 @@ type Config = {
     noProgressRounds?: number; model?: string; allowHost?: boolean };
   governor?: "standard" | { maxToolCalls?: number; maxSeconds?: number; repeatLimit?: number };
   undo?: { mode?: "on" | "off"; maxRunMb?: number; keepRuns?: number; dir?: string };
+  reviewer?: { mode?: "off" | "on"; model?: string; timeoutMs?: number };
   control?: {
     mode?: "observe" | "enforce";
     preset?: "none" | "recommended" | "strict";
@@ -117,6 +119,19 @@ export default {
       writeReady({ type: "undo_ready", ...undoSettings });
     }
 
+    // The reviewer (src/reviewer.js): a model's second opinion on a held call, from the user's own messages
+    // only, before it waits for a person. Off unless reviewer.mode is "on".
+    let reviewer: any = null;
+    if (config.reviewer?.mode === "on") {
+      if (typeof api.runtime?.llm?.complete !== "function") {
+        writeLog({ error: "the reviewer needs api.runtime.llm (OpenClaw 2026.9 or later): disabled" });
+      } else {
+        reviewer = createReviewer({ complete: (params: any) => api.runtime.llm.complete(params), log: writeLog,
+          model: config.reviewer.model ?? null, timeoutMs: config.reviewer.timeoutMs ?? 20_000 });
+        writeReady({ type: "reviewer_ready", model: config.reviewer.model ?? null });
+      }
+    }
+
     // The governor (src/governor.js): stops runs that spend without progress -
     // a tool-call or time budget, the same call over and over. Off unless configured.
     const limits = limitsFrom(config.governor);
@@ -186,9 +201,19 @@ export default {
       if (stop) return { block: true, blockReason: stop };
       const decision = gate(event, ctx);
       // A call the gate lets through (or holds for approval) may change files: journal them first.
-      if (!decision?.block) {
+      const journal = () => {
         try { undo?.beforeCall(runKeyOf(event, ctx), event?.toolName, event?.params); } catch { /* never in the way */ }
+      };
+      if (reviewer && decision?.requireApproval) {
+        return reviewer.review(event, ctx, authz.requests(ctx?.sessionKey)).then((verdict: any) => {
+          journal();
+          if (verdict.approve) return undefined;
+          decision.requireApproval.description += `
+Xybernetex reviewer: ${verdict.why || "not clearly requested"}`;
+          return decision;
+        });
       }
+      if (!decision?.block) journal();
       return decision;
     }, { priority: 100 });
     writeReady({ type: "tool_gate_ready", proposalTelemetry: config.proposalTelemetry === true, mode: config.control?.mode ?? "observe",
